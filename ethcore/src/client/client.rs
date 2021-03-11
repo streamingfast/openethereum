@@ -464,6 +464,10 @@ impl Importer {
 			client
 		)?;
 
+		if deepmind::is_enabled() {
+			println!("DMLOG FINALIZE_BLOCK {}", header.number())
+		}
+
 		Ok((locked_block, pending))
 	}
 

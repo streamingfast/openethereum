@@ -1,0 +1,10 @@
+[package]
+description = "OpenEthereum Deep Mind Implementations"
+name = "deepmind"
+version = "0.0.1"
+authors = ["dfuse Developers <developers@dfuse.io>"]
+
+[dependencies]
+
+[features]
+default = []
