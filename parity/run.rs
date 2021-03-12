@@ -137,6 +137,7 @@ pub struct RunCmd {
 	pub on_demand_request_backoff_max: Option<u64>,
 	pub on_demand_request_backoff_rounds_max: Option<usize>,
 	pub on_demand_request_consecutive_failures: Option<usize>,
+	pub dm_config: deepmind::Config,
 }
 
 // node info fetcher for the local store.
@@ -538,6 +539,7 @@ fn execute_impl<Cr, Rr>(
 		cmd.pruning_memory,
 		cmd.check_seal,
 		cmd.max_round_blocks_to_import,
+		cmd.dm_config,
 	);
 
 	client_config.queue.verifier_settings = cmd.verifier_settings;
@@ -641,7 +643,7 @@ fn execute_impl<Cr, Rr>(
 
 	let mut private_tx_sync = None;
 	let mut private_state = None;
-	
+
 	if cmd.private_tx_enabled {
 		warn!("Private transactions support is deprecated and may be removed in a future release. Please see #11695 for details:\nhttps://github.com/openethereum/openethereum/issues/11695");
 		private_tx_sync = Some(private_tx_service.clone() as Arc<dyn PrivateTxHandler>);

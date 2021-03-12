@@ -1126,6 +1126,19 @@ usage! {
 			ARG arg_ntp_servers: (Option<String>) = None, or |_| None,
 			"--ntp-servers=[HOSTS]",
 			"Does nothing; checking if clock is sync with NTP servers is now done on the UI.",
+
+		["Deep Mind Options"]
+			FLAG flag_deep_mind: (bool) = false, or |_| None,
+			"--deep-mind",
+			"Activate/deactivate Deep Mind instrumentation within the node.",
+
+			FLAG flag_deep_mind_sync_instrumentation: (bool) = false, or |_| None,
+			"--deep-mind-sync-instrumentation",
+			"Activate/deactivate Deep Mind chain syncing output instrumentation within the node.",
+
+			FLAG flag_deep_mind_block_progress: (bool) = false, or |_| None,
+			"--deep-mind-block-progress",
+			"Activate/deactivate Deep Mind block progress output instrumentation within the node.",
 	}
 }
 

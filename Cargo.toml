@@ -18,6 +18,7 @@ cli-signer= { path = "cli-signer" }
 client-traits = { path = "ethcore/client-traits" }
 common-types = { path = "ethcore/types" }
 ctrlc = { version = "3.1.4", features = ["termination"] }
+deepmind = { path = "deepmind" }
 dir = { path = "util/dir" }
 docopt = "1.0"
 engine = { path = "ethcore/engine" }

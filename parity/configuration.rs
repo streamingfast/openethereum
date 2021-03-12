@@ -361,6 +361,12 @@ impl Configuration {
 			let verifier_settings = self.verifier_settings();
 			let (private_provider_conf, private_enc_conf, private_tx_enabled) = self.private_provider_config()?;
 
+			let dm_config = deepmind::Config {
+				enabled: self.args.flag_deep_mind,
+				on_chain_sync: self.args.flag_deep_mind_sync_instrumentation,
+				on_block_progress: self.args.flag_deep_mind_block_progress,
+			};
+
 			let run_cmd = RunCmd {
 				cache_config,
 				dirs,
@@ -413,6 +419,7 @@ impl Configuration {
 				on_demand_request_backoff_max: self.args.arg_on_demand_request_backoff_max,
 				on_demand_request_backoff_rounds_max: self.args.arg_on_demand_request_backoff_rounds_max,
 				on_demand_request_consecutive_failures: self.args.arg_on_demand_request_consecutive_failures,
+				dm_config,
 			};
 			Cmd::Run(run_cmd)
 		};
@@ -1453,6 +1460,7 @@ mod tests {
 			on_demand_request_backoff_max: None,
 			on_demand_request_backoff_rounds_max: None,
 			on_demand_request_consecutive_failures: None,
+			dm_config: Default::default(),
 		};
 		expected.secretstore_conf.enabled = cfg!(feature = "secretstore");
 		expected.secretstore_conf.http_enabled = cfg!(feature = "secretstore");

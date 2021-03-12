@@ -186,6 +186,7 @@ impl SnapshotCommand {
 			self.pruning_memory,
 			true,
 			self.max_round_blocks_to_import,
+			deepmind::Config::disabled(),
 		);
 
 		client_config.snapshot = self.snapshot_conf;

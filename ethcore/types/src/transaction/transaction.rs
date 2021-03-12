@@ -357,6 +357,11 @@ impl UnverifiedTransaction {
 		}
 	}
 
+	/// Added for Deep Mind needs, extracts the signature elements as a tuple of (v, r, s)
+	pub fn signature_for_deepmind(&self) -> (u64, H256, H256) {
+		(self.original_v(), BigEndianHash::from_uint(&self.r),  BigEndianHash::from_uint(&self.s))
+	}
+
 	/// Construct a signature object from the sig.
 	pub fn signature(&self) -> Signature {
 		let r: H256 = BigEndianHash::from_uint(&self.r);

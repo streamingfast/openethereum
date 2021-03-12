@@ -258,6 +258,7 @@ pub struct Miner {
 	accounts: Arc<dyn LocalAccounts>,
 	io_channel: RwLock<Option<IoChannel<ClientIoMessage<Client>>>>,
 	service_transaction_checker: Option<ServiceTransactionChecker>,
+	dm_context: deepmind::Context,
 }
 
 impl Miner {
@@ -320,6 +321,7 @@ impl Miner {
 			} else {
 				Some(ServiceTransactionChecker::default())
 			},
+			dm_context: deepmind::Context::noop(),
 		}
 	}
 
@@ -535,7 +537,7 @@ impl Miner {
 			let result = client.verify_for_pending_block(&transaction, &open_block.header)
 				.map_err(|e| e.into())
 				.and_then(|_| {
-					open_block.push_transaction(transaction)
+					open_block.push_transaction(transaction, &self.dm_context)
 				});
 
 			let took = start.elapsed();

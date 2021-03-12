@@ -240,6 +240,7 @@ pub fn to_client_config(
 	pruning_memory: usize,
 	check_seal: bool,
 	max_round_blocks_to_import: usize,
+	dm_config: deepmind::Config,
 ) -> ClientConfig {
 	let mut client_config = ClientConfig::default();
 
@@ -273,6 +274,7 @@ pub fn to_client_config(
 	client_config.verifier_type = if check_seal { VerifierType::Canon } else { VerifierType::CanonNoSeal };
 	client_config.spec_name = spec_name;
 	client_config.max_round_blocks_to_import = max_round_blocks_to_import;
+	client_config.dm_config = dm_config;
 	client_config
 }
 

@@ -175,6 +175,9 @@ struct Importer {
 
 	/// A lru cache of recently detected bad blocks
 	pub bad_blocks: bad_blocks::BadBlocks,
+
+	/// Deep Mind context used by this specific importer
+	pub dm_context: deepmind::Context,
 }
 
 /// Blockchain database client backed by a persistent database. Owns and manages a blockchain and a block queue.
@@ -257,6 +260,7 @@ impl Importer {
 		engine: Arc<dyn Engine>,
 		message_channel: IoChannel<ClientIoMessage<Client>>,
 		miner: Arc<Miner>,
+		dm_context: deepmind::Context,
 	) -> Result<Importer, EthcoreError> {
 		let block_queue = BlockQueue::new(
 			config.queue.clone(),
@@ -272,6 +276,7 @@ impl Importer {
 			ancient_verifier: AncientVerifier::new(engine.clone()),
 			engine,
 			bad_blocks: Default::default(),
+			dm_context,
 		})
 	}
 
@@ -311,7 +316,7 @@ impl Importer {
 					continue;
 				}
 
-				match self.check_and_lock_block(block, client) {
+				match self.check_and_lock_block(block, &block_bytes, client) {
 					Ok((locked_block, pending)) => {
 						imported_blocks.push(hash);
 						let transactions_len = locked_block.transactions.len();
@@ -372,7 +377,7 @@ impl Importer {
 		imported
 	}
 
-	fn check_and_lock_block(&self, block: PreverifiedBlock, client: &Client) -> EthcoreResult<(LockedBlock, Option<PendingTransition>)> {
+	fn check_and_lock_block(&self, block: PreverifiedBlock, block_bytes: &Vec<u8>, client: &Client) -> EthcoreResult<(LockedBlock, Option<PendingTransition>)> {
 		let engine = &*self.engine;
 		let header = &block.header;
 		// Check the block isn't so old we won't be able to enact it.
@@ -421,6 +426,10 @@ impl Importer {
 
 		let is_epoch_begin = chain.epoch_transition(parent.number(), *header.parent_hash()).is_some();
 
+		if self.dm_context.is_enabled() {
+			self.dm_context.start_block(header.number());
+		}
+
 		let enact_result = enact(
 			header,
 			block.transactions,
@@ -432,6 +441,7 @@ impl Importer {
 			last_hashes,
 			client.factories.clone(),
 			is_epoch_begin,
+			&self.dm_context,
 		);
 
 		let mut locked_block = match enact_result {
@@ -441,6 +451,10 @@ impl Importer {
 				return Err(e);
 			}
 		};
+
+		if self.dm_context.is_finalize_block_enabled() {
+			self.dm_context.finalize_block(header.number());
+		}
 
 		// Strip receipts for blocks before validate_receipts_transition,
 		// if the expected receipts root header does not match.
@@ -464,8 +478,8 @@ impl Importer {
 			client
 		)?;
 
-		if deepmind::is_enabled() {
-			println!("DMLOG FINALIZE_BLOCK {}", header.number())
+		if self.dm_context.is_enabled() {
+			self.dm_context.end_block(block_bytes.len() as u64, header, &locked_block.uncles);
 		}
 
 		Ok((locked_block, pending))
@@ -768,7 +782,25 @@ impl Client {
 
 		let awake = match config.mode { Mode::Dark(..) | Mode::Off => false, _ => true };
 
-		let importer = Importer::new(&config, engine.clone(), message_channel.clone(), miner)?;
+		let dm_config = &config.dm_config;
+		info!(target: "client", "Initializing deep mind ({:?})", dm_config);
+		let dm_context = match dm_config.enabled || dm_config.on_block_progress {
+			true => {
+				let mut instrumentation = deepmind::Instrumentation::Full;
+				if !dm_config.enabled && dm_config.on_block_progress {
+					instrumentation = deepmind::Instrumentation::BlockProgress;
+				}
+
+				// FIXME: Handle when dm_config.on_chain_syncing == false which is for
+				//        speculative execution which should enable full instrumentation
+				//        but with a different printer.
+
+				deepmind::Context::new(instrumentation)
+			},
+			_ => deepmind::Context::noop(),
+		};
+
+		let importer = Importer::new(&config, engine.clone(), message_channel.clone(), miner, dm_context)?;
 
 		let registrar_address = engine.machine().params().registrar;
 		if let Some(ref addr) = registrar_address {

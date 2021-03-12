@@ -866,6 +866,11 @@ dependencies = [
 [[package]]
 name = "deepmind"
 version = "0.0.1"
+dependencies = [
+ "common-types",
+ "ethereum-types",
+ "rustc-hex 2.1.0",
+]
 
 [[package]]
 name = "derive_more"
@@ -3128,6 +3133,7 @@ dependencies = [
  "client-traits",
  "common-types",
  "ctrlc",
+ "deepmind",
  "dir",
  "docopt",
  "engine",
