@@ -159,7 +159,7 @@ fn can_trace_block_and_uncle_reward() {
 		value: U256::zero(),
 	}.sign(kp.secret(), Some(spec.network_id()));
 
-	block.push_transaction(signed_tx).unwrap();
+	block.push_transaction(signed_tx, deepmind::Context::noop()).unwrap();
 
 	let mut uncle = Header::new();
 	let uncle_author = Address::from_str("ef2d6d194084c2de36e0dabfce45d046b37d1106").unwrap();

@@ -96,7 +96,7 @@ pub fn check_proof(
 	};
 
 	let options = TransactOptions::with_no_tracing().save_output_from_contract();
-	match execute(&mut state, env_info, machine, transaction, options, true) {
+	match execute(&mut state, env_info, machine, transaction, options, true, &deepmind::Context::noop()) {
 		Ok(executed) => ProvedExecution::Complete(Box::new(executed)),
 		Err(ExecutionError::Internal(_)) => ProvedExecution::BadProof,
 		Err(e) => ProvedExecution::Failed(e),
@@ -130,7 +130,7 @@ pub fn prove_transaction_virtual<H: AsHashDB<KeccakHasher, DBValue> + Send + Syn
 	};
 
 	let options = TransactOptions::with_no_tracing().dont_check_nonce().save_output_from_contract();
-	match execute(&mut state, env_info, machine, transaction, options, true) {
+	match execute(&mut state, env_info, machine, transaction, options, true, &deepmind::Context::noop()) {
 		Err(ExecutionError::Internal(_)) => None,
 		Err(e) => {
 			trace!(target: "state", "Proved call failed: {}", e);
@@ -149,7 +149,8 @@ pub trait ExecutiveState {
 		env_info: &EnvInfo,
 		machine: &Machine,
 		t: &SignedTransaction,
-		tracing: bool
+		tracing: bool,
+		dm_context: &deepmind::Context,
 	) -> ApplyResult<FlatTrace, VMTrace>;
 
 	/// Execute a given transaction with given tracer and VM tracer producing a receipt and an optional trace.
@@ -160,6 +161,7 @@ pub trait ExecutiveState {
 		machine: &Machine,
 		t: &SignedTransaction,
 		options: TransactOptions<T, V>,
+		dm_context: &deepmind::Context,
 	) -> ApplyResult<T::Output, V::Output>
 		where
 			T: trace::Tracer,
@@ -174,14 +176,15 @@ impl<B: Backend> ExecutiveState for State<B> {
 		env_info: &EnvInfo,
 		machine: &Machine,
 		t: &SignedTransaction,
-		tracing: bool
+		tracing: bool,
+		dm_context: &deepmind::Context,
 	) -> ApplyResult<FlatTrace, VMTrace> {
 		if tracing {
 			let options = TransactOptions::with_tracing();
-			self.apply_with_tracing(env_info, machine, t, options)
+			self.apply_with_tracing(env_info, machine, t, options, dm_context)
 		} else {
 			let options = TransactOptions::with_no_tracing();
-			self.apply_with_tracing(env_info, machine, t, options)
+			self.apply_with_tracing(env_info, machine, t, options, dm_context)
 		}
 	}
 
@@ -192,13 +195,14 @@ impl<B: Backend> ExecutiveState for State<B> {
 		env_info: &EnvInfo,
 		machine: &Machine,
 		t: &SignedTransaction,
-		options: TransactOptions<T, V>
+		options: TransactOptions<T, V>,
+		dm_context: &deepmind::Context,
 	) -> ApplyResult<T::Output, V::Output>
 		where
 			T: trace::Tracer,
 			V: trace::VMTracer,
 	{
-		let e = execute(self, env_info, machine, t, options, false)?;
+		let e = execute(self, env_info, machine, t, options, false, dm_context)?;
 		let params = machine.params();
 
 		let eip658 = env_info.number >= params.eip658_transition;
@@ -240,7 +244,8 @@ fn execute<B, T, V>(
 	machine: &Machine,
 	t: &SignedTransaction,
 	options: TransactOptions<T, V>,
-	virt: bool
+	virt: bool,
+	dm_context: &deepmind::Context,
 ) -> Result<RawExecuted<T::Output, V::Output>, ExecutionError>
 	where
 		B: Backend,
@@ -251,8 +256,8 @@ fn execute<B, T, V>(
 	let mut e = Executive::new(state, env_info, machine, &schedule);
 
 	match virt {
-		true => e.transact_virtual(t, options),
-		false => e.transact(t, options),
+		true => e.transact_virtual(t, options, dm_context),
+		false => e.transact(t, options, dm_context),
 	}
 }
 

@@ -177,7 +177,7 @@ impl<'x> OpenBlock<'x> {
 		}
 
 		let env_info = self.block.env_info();
-		let outcome = self.block.state.apply(&env_info, self.engine.machine(), &t, self.block.traces.is_enabled())?;
+		let outcome = self.block.state.apply(&env_info, self.engine.machine(), &t, self.block.traces.is_enabled(), dm_context)?;
 
 		if dm_context.is_enabled() {
 			dm_context.end_transaction();

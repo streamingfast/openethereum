@@ -373,15 +373,16 @@ impl<'a> CallCreateExecutive<'a> {
 		output: OutputPolicy,
 		tracer: &'any mut T,
 		vm_tracer: &'any mut V,
+		dm_context: &'any deepmind::Context,
 	) -> Externalities<'any, T, V, B> where T: Tracer, V: VMTracer {
-		Externalities::new(state, info, machine, schedule, depth, stack_depth, origin_info, substate, output, tracer, vm_tracer, static_flag)
+		Externalities::new(state, info, machine, schedule, depth, stack_depth, origin_info, substate, output, tracer, vm_tracer, static_flag, dm_context)
 	}
 
 	/// Execute the executive. If a sub-call/create action is required, a resume trap error is returned. The caller is
 	/// then expected to call `resume_call` or `resume_create` to continue the execution.
 	///
 	/// Current-level tracing is expected to be handled by caller.
-	pub fn exec<B: 'a + StateBackend, T: Tracer, V: VMTracer>(mut self, state: &mut State<B>, substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V) -> ExecutiveTrapResult<'a, FinalizationResult> {
+	pub fn exec<B: 'a + StateBackend, T: Tracer, V: VMTracer>(mut self, state: &mut State<B>, substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_context: &deepmind::Context) -> ExecutiveTrapResult<'a, FinalizationResult> {
 		match self.kind {
 			CallCreateExecutiveKind::Transfer(ref params) => {
 				assert!(!self.is_create);
@@ -470,7 +471,7 @@ impl<'a> CallCreateExecutive<'a> {
 
 				let out = match exec {
 					Some(exec) => {
-						let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, OutputPolicy::Return, tracer, vm_tracer);
+						let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, OutputPolicy::Return, tracer, vm_tracer, dm_context);
 						match exec.exec(&mut ext) {
 							Ok(val) => Ok(val.finalize(ext)),
 							Err(err) => Err(err),
@@ -521,7 +522,7 @@ impl<'a> CallCreateExecutive<'a> {
 
 				let out = match exec {
 					Some(exec) => {
-						let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, OutputPolicy::InitContract, tracer, vm_tracer);
+						let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, OutputPolicy::InitContract, tracer, vm_tracer, dm_context);
 						match exec.exec(&mut ext) {
 							Ok(val) => Ok(val.finalize(ext)),
 							Err(err) => Err(err),
@@ -552,13 +553,13 @@ impl<'a> CallCreateExecutive<'a> {
 	/// Resume execution from a call trap previsouly trapped by `exec`.
 	///
 	/// Current-level tracing is expected to be handled by caller.
-	pub fn resume_call<B: 'a + StateBackend, T: Tracer, V: VMTracer>(mut self, result: vm::MessageCallResult, state: &mut State<B>, substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V) -> ExecutiveTrapResult<'a, FinalizationResult> {
+	pub fn resume_call<B: 'a + StateBackend, T: Tracer, V: VMTracer>(mut self, result: vm::MessageCallResult, state: &mut State<B>, substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_context: &deepmind::Context) -> ExecutiveTrapResult<'a, FinalizationResult> {
 		match self.kind {
 			CallCreateExecutiveKind::ResumeCall(origin_info, resume, mut unconfirmed_substate) => {
 				let out = {
 					let exec = resume.resume_call(result);
 
-					let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, if self.is_create { OutputPolicy::InitContract } else { OutputPolicy::Return }, tracer, vm_tracer);
+					let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, if self.is_create { OutputPolicy::InitContract } else { OutputPolicy::Return }, tracer, vm_tracer, dm_context);
 					match exec.exec(&mut ext) {
 						Ok(val) => Ok(val.finalize(ext)),
 						Err(err) => Err(err),
@@ -591,13 +592,13 @@ impl<'a> CallCreateExecutive<'a> {
 	/// Resume execution from a create trap previsouly trapped by `exec`.
 	///
 	/// Current-level tracing is expected to be handled by caller.
-	pub fn resume_create<B: 'a + StateBackend, T: Tracer, V: VMTracer>(mut self, result: vm::ContractCreateResult, state: &mut State<B>, substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V) -> ExecutiveTrapResult<'a, FinalizationResult> {
+	pub fn resume_create<B: 'a + StateBackend, T: Tracer, V: VMTracer>(mut self, result: vm::ContractCreateResult, state: &mut State<B>, substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_context: &deepmind::Context) -> ExecutiveTrapResult<'a, FinalizationResult> {
 		match self.kind {
 			CallCreateExecutiveKind::ResumeCreate(origin_info, resume, mut unconfirmed_substate) => {
 				let out = {
 					let exec = resume.resume_create(result);
 
-					let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, if self.is_create { OutputPolicy::InitContract } else { OutputPolicy::Return }, tracer, vm_tracer);
+					let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, if self.is_create { OutputPolicy::InitContract } else { OutputPolicy::Return }, tracer, vm_tracer, dm_context);
 					match exec.exec(&mut ext) {
 						Ok(val) => Ok(val.finalize(ext)),
 						Err(err) => Err(err),
@@ -628,8 +629,8 @@ impl<'a> CallCreateExecutive<'a> {
 	}
 
 	/// Execute and consume the current executive. This function handles resume traps and sub-level tracing. The caller is expected to handle current-level tracing.
-	pub fn consume<B: 'a + StateBackend, T: Tracer, V: VMTracer>(self, state: &mut State<B>, top_substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V) -> vm::Result<FinalizationResult> {
-		let mut last_res = Some((false, self.gas, self.exec(state, top_substate, tracer, vm_tracer)));
+	pub fn consume<B: 'a + StateBackend, T: Tracer, V: VMTracer>(self, state: &mut State<B>, top_substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_context: &deepmind::Context) -> vm::Result<FinalizationResult> {
+		let mut last_res = Some((false, self.gas, self.exec(state, top_substate, tracer, vm_tracer, dm_context)));
 
 		let mut callstack: Vec<(Option<Address>, CallCreateExecutive<'a>)> = Vec::new();
 		loop {
@@ -643,7 +644,7 @@ impl<'a> CallCreateExecutive<'a> {
 								None => top_substate,
 							};
 
-							last_res = Some((exec.is_create, exec.gas, exec.exec(state, parent_substate, tracer, vm_tracer)));
+							last_res = Some((exec.is_create, exec.gas, exec.exec(state, parent_substate, tracer, vm_tracer, dm_context)));
 						},
 						None => panic!("When callstack only had one item and it was executed, this function would return; callstack never reaches zero item; qed"),
 					}
@@ -686,7 +687,8 @@ impl<'a> CallCreateExecutive<'a> {
 									state,
 									parent_substate,
 									tracer,
-									vm_tracer
+									vm_tracer,
+									dm_context,
 								)));
 							} else {
 								match val {
@@ -717,7 +719,8 @@ impl<'a> CallCreateExecutive<'a> {
 									state,
 									parent_substate,
 									tracer,
-									vm_tracer
+									vm_tracer,
+									dm_context,
 								)));
 							}
 						},
@@ -755,7 +758,7 @@ impl<'a> CallCreateExecutive<'a> {
 						resume.factory,
 						resume.depth + 1,
 						resume.stack_depth,
-						resume.static_flag
+						resume.static_flag,
 					);
 
 					callstack.push((Some(address), resume));
@@ -803,7 +806,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 	}
 
 	/// This function should be used to execute transaction.
-	pub fn transact<T, V>(&'a mut self, t: &SignedTransaction, options: TransactOptions<T, V>)
+	pub fn transact<T, V>(&'a mut self, t: &SignedTransaction, options: TransactOptions<T, V>, dm_context: &deepmind::Context)
 		-> Result<Executed<T::Output, V::Output>, ExecutionError> where T: Tracer, V: VMTracer,
 	{
 		self.transact_with_tracer(
@@ -811,14 +814,15 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 			options.check_nonce,
 			options.output_from_init_contract,
 			options.tracer,
-			options.vm_tracer
+			options.vm_tracer,
+			dm_context
 		)
 	}
 
 	/// Execute a transaction in a "virtual" context.
 	/// This will ensure the caller has enough balance to execute the desired transaction.
 	/// Used for extra-block executions for things like consensus contracts and RPCs
-	pub fn transact_virtual<T, V>(&'a mut self, t: &SignedTransaction, options: TransactOptions<T, V>)
+	pub fn transact_virtual<T, V>(&'a mut self, t: &SignedTransaction, options: TransactOptions<T, V>, dm_context: &deepmind::Context)
 		-> Result<Executed<T::Output, V::Output>, ExecutionError> where T: Tracer, V: VMTracer,
 	{
 		let sender = t.sender();
@@ -829,7 +833,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 			self.state.add_balance(&sender, &(needed_balance - balance), CleanupMode::NoEmpty)?;
 		}
 
-		self.transact(t, options)
+		self.transact(t, options, dm_context)
 	}
 
 	/// Execute transaction/call with tracing enabled
@@ -839,7 +843,8 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		check_nonce: bool,
 		output_from_create: bool,
 		mut tracer: T,
-		mut vm_tracer: V
+		mut vm_tracer: V,
+		dm_context: &deepmind::Context,
 	) -> Result<Executed<T::Output, V::Output>, ExecutionError> where T: Tracer, V: VMTracer {
 		let sender = t.sender();
 		let nonce = self.state.nonce(&sender)?;
@@ -910,7 +915,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 					action_type: ActionType::Create,
 					params_type: vm::ParamsType::Embedded,
 				};
-				let res = self.create(params, &mut substate, &mut tracer, &mut vm_tracer);
+				let res = self.create(params, &mut substate, &mut tracer, &mut vm_tracer, dm_context);
 				let out = match &res {
 					Ok(res) if output_from_create => res.return_data.to_vec(),
 					_ => Vec::new(),
@@ -933,7 +938,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 					action_type: ActionType::Call,
 					params_type: vm::ParamsType::Separate,
 				};
-				let res = self.call(params, &mut substate, &mut tracer, &mut vm_tracer);
+				let res = self.call(params, &mut substate, &mut tracer, &mut vm_tracer, dm_context);
 				let out = match &res {
 					Ok(res) => res.return_data.to_vec(),
 					_ => Vec::new(),
@@ -943,7 +948,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		};
 
 		// finalize here!
-		Ok(self.finalize(t, substate, result, output, tracer.drain(), vm_tracer.drain())?)
+		Ok(self.finalize(t, substate, result, output, tracer.drain(), vm_tracer.drain(), dm_context)?)
 	}
 
 	/// Calls contract function with given contract params and stack depth.
@@ -956,7 +961,8 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		substate: &mut Substate,
 		stack_depth: usize,
 		tracer: &mut T,
-		vm_tracer: &mut V
+		vm_tracer: &mut V,
+		dm_context: &deepmind::Context,
 	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
 		tracer.prepare_trace_call(&params, self.depth, self.machine.builtin(&params.address, self.info.number).is_some());
 		vm_tracer.prepare_subtrace(params.code.as_ref().map_or_else(|| &[] as &[u8], |d| &*d as &[u8]));
@@ -972,8 +978,8 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 			&vm_factory,
 			self.depth,
 			stack_depth,
-			self.static_flag
-		).consume(self.state, substate, tracer, vm_tracer);
+			self.static_flag,
+		).consume(self.state, substate, tracer, vm_tracer, dm_context);
 
 		match result {
 			Ok(ref val) if val.apply_state => {
@@ -1002,20 +1008,21 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		substate: &mut Substate,
 		stack_depth: usize,
 		tracer: &mut T,
-		vm_tracer: &mut V
+		vm_tracer: &mut V,
+		dm_context: &deepmind::Context,
 	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
 		let local_stack_size = ethcore_io::LOCAL_STACK_SIZE.with(|sz| sz.get());
 		let depth_threshold = local_stack_size.saturating_sub(STACK_SIZE_ENTRY_OVERHEAD) / STACK_SIZE_PER_DEPTH;
 
 		if stack_depth != depth_threshold {
-			self.call_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer)
+			self.call_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer, dm_context)
 		} else {
 			thread::scope(|scope| {
 				let stack_size = cmp::max(self.schedule.max_depth.saturating_sub(depth_threshold) * STACK_SIZE_PER_DEPTH, local_stack_size);
 				scope.builder()
 					.stack_size(stack_size)
 					.spawn(|_| {
-						self.call_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer)
+						self.call_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer, dm_context)
 					})
 					.expect("Sub-thread creation cannot fail; the host might run out of resources; qed")
 					.join()
@@ -1031,9 +1038,10 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		params: ActionParams,
 		substate: &mut Substate,
 		tracer: &mut T,
-		vm_tracer: &mut V
+		vm_tracer: &mut V,
+		dm_context: &deepmind::Context,
 	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
-		self.call_with_stack_depth(params, substate, 0, tracer, vm_tracer)
+		self.call_with_stack_depth(params, substate, 0, tracer, vm_tracer, dm_context)
 	}
 
 	/// Creates contract with given contract params and stack depth.
@@ -1046,6 +1054,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		stack_depth: usize,
 		tracer: &mut T,
 		vm_tracer: &mut V,
+		dm_context: &deepmind::Context,
 	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
 		tracer.prepare_trace_create(&params);
 		vm_tracer.prepare_subtrace(params.code.as_ref().map_or_else(|| &[] as &[u8], |d| &*d as &[u8]));
@@ -1063,7 +1072,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 			self.depth,
 			stack_depth,
 			self.static_flag
-		).consume(self.state, substate, tracer, vm_tracer);
+		).consume(self.state, substate, tracer, vm_tracer, dm_context);
 
 		match result {
 			Ok(ref val) if val.apply_state => {
@@ -1094,19 +1103,20 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		stack_depth: usize,
 		tracer: &mut T,
 		vm_tracer: &mut V,
+		dm_context: &deepmind::Context,
 	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
 		let local_stack_size = ethcore_io::LOCAL_STACK_SIZE.with(|sz| sz.get());
 		let depth_threshold = local_stack_size.saturating_sub(STACK_SIZE_ENTRY_OVERHEAD) / STACK_SIZE_PER_DEPTH;
 
 		if stack_depth != depth_threshold {
-			self.create_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer)
+			self.create_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer, dm_context)
 		} else {
 			thread::scope(|scope| {
 				let stack_size = cmp::max(self.schedule.max_depth.saturating_sub(depth_threshold) * STACK_SIZE_PER_DEPTH, local_stack_size);
 				scope.builder()
 					.stack_size(stack_size)
 					.spawn(|_| {
-						self.create_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer)
+						self.create_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer, dm_context)
 					})
 					.expect("Sub-thread creation cannot fail; the host might run out of resources; qed")
 					.join()
@@ -1123,8 +1133,9 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		substate: &mut Substate,
 		tracer: &mut T,
 		vm_tracer: &mut V,
+		dm_context: &deepmind::Context,
 	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
-		self.create_with_stack_depth(params, substate, 0, tracer, vm_tracer)
+		self.create_with_stack_depth(params, substate, 0, tracer, vm_tracer, dm_context)
 	}
 
 	/// Finalizes the transaction (does refunds and suicides).
@@ -1135,7 +1146,8 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		result: vm::Result<FinalizationResult>,
 		output: Bytes,
 		trace: Vec<T>,
-		vm_trace: Option<V>
+		vm_trace: Option<V>,
+		dm_context: &deepmind::Context,
 	) -> Result<Executed<T, V>, ExecutionError> {
 		let schedule = self.schedule;
 
@@ -1327,7 +1339,7 @@ mod tests {
 
 		let FinalizationResult { gas_left, .. } = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			ex.create(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer).unwrap()
+			ex.create(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer, deepmind::Context::noop()).unwrap()
 		};
 
 		assert_eq!(gas_left, U256::from(79_975));
@@ -1386,7 +1398,7 @@ mod tests {
 
 		let FinalizationResult { gas_left, .. } = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			ex.create(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer).unwrap()
+			ex.create(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer, deepmind::Context::noop()).unwrap()
 		};
 
 		assert_eq!(gas_left, U256::from(62_976));
@@ -1430,7 +1442,7 @@ mod tests {
 		let mut vm_tracer = ExecutiveVMTracer::toplevel();
 
 		let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-		ex.call(params, &mut substate, &mut tracer, &mut vm_tracer).unwrap();
+		ex.call(params, &mut substate, &mut tracer, &mut vm_tracer, deepmind::Context::noop()).unwrap();
 
 		assert_eq!(tracer.drain(), vec![FlatTrace {
 			action: trace::Action::Call(trace::Call {
@@ -1515,7 +1527,7 @@ mod tests {
 
 		let FinalizationResult { gas_left, .. } = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			ex.call(params, &mut substate, &mut tracer, &mut vm_tracer).unwrap()
+			ex.call(params, &mut substate, &mut tracer, &mut vm_tracer, deepmind::Context::noop()).unwrap()
 		};
 
 		assert_eq!(gas_left, U256::from(44_752));
@@ -1632,7 +1644,7 @@ mod tests {
 
 		let FinalizationResult { gas_left, .. } = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			ex.call(params, &mut substate, &mut tracer, &mut vm_tracer).unwrap()
+			ex.call(params, &mut substate, &mut tracer, &mut vm_tracer, deepmind::Context::noop()).unwrap()
 		};
 
 		assert_eq!(gas_left, U256::from(62967));
@@ -1705,7 +1717,7 @@ mod tests {
 
 		let FinalizationResult { gas_left, .. } = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			ex.create(params.clone(), &mut substate, &mut tracer, &mut vm_tracer).unwrap()
+			ex.create(params.clone(), &mut substate, &mut tracer, &mut vm_tracer, deepmind::Context::noop()).unwrap()
 		};
 
 		assert_eq!(gas_left, U256::from(96_776));
@@ -1792,7 +1804,7 @@ mod tests {
 
 		let FinalizationResult { gas_left, .. } = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			ex.create(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer).unwrap()
+			ex.create(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer, deepmind::Context::noop()).unwrap()
 		};
 
 		assert_eq!(gas_left, U256::from(62_976));
@@ -1844,7 +1856,7 @@ mod tests {
 
 		{
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			ex.create(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer).unwrap();
+			ex.create(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer, deepmind::Context::noop()).unwrap();
 		}
 
 		assert_eq!(substate.contracts_created.len(), 1);
@@ -1905,7 +1917,7 @@ mod tests {
 
 		let FinalizationResult { gas_left, .. } = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			ex.call(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer).unwrap()
+			ex.call(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer,deepmind::Context::noop()).unwrap()
 		};
 
 		assert_eq!(gas_left, U256::from(73_237));
@@ -1956,7 +1968,7 @@ mod tests {
 
 		let FinalizationResult { gas_left, .. } = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			ex.call(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer).unwrap()
+			ex.call(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer, deepmind::Context::noop()).unwrap()
 		};
 
 		assert_eq!(gas_left, U256::from(59_870));
@@ -1990,7 +2002,7 @@ mod tests {
 		let executed = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
 			let opts = TransactOptions::with_no_tracing();
-			ex.transact(&t, opts).unwrap()
+			ex.transact(&t, opts, deepmind::Context::noop()).unwrap()
 		};
 
 		assert_eq!(executed.gas, U256::from(100_000));
@@ -2028,7 +2040,7 @@ mod tests {
 		let res = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
 			let opts = TransactOptions::with_no_tracing();
-			ex.transact(&t, opts)
+			ex.transact(&t, opts, deepmind::Context::noop())
 		};
 
 		match res {
@@ -2062,7 +2074,7 @@ mod tests {
 		let res = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
 			let opts = TransactOptions::with_no_tracing();
-			ex.transact(&t, opts)
+			ex.transact(&t, opts, deepmind::Context::noop())
 		};
 
 		match res {
@@ -2096,7 +2108,7 @@ mod tests {
 		let res = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
 			let opts = TransactOptions::with_no_tracing();
-			ex.transact(&t, opts)
+			ex.transact(&t, opts, deepmind::Context::noop())
 		};
 
 		match res {
@@ -2130,7 +2142,7 @@ mod tests {
 
 		let result = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			ex.create(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer)
+			ex.create(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer, deepmind::Context::noop())
 		};
 
 		match result {
@@ -2165,7 +2177,7 @@ mod tests {
 		let mut output = [0u8; 14];
 		let FinalizationResult { gas_left: result, return_data, .. } = {
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			ex.call(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer).unwrap()
+			ex.call(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer, deepmind::Context::noop()).unwrap()
 		};
 		(&mut output).copy_from_slice(&return_data[..(cmp::min(14, return_data.len()))]);
 
@@ -2206,7 +2218,7 @@ mod tests {
 			params.gas = gas;
 			let mut substate = Substate::new();
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			let res = ex.call(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer).unwrap();
+			let res = ex.call(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer, deepmind::Context::noop()).unwrap();
 
 			(res, substate.sstore_clears_refund, gas)
 		};
@@ -2224,7 +2236,7 @@ mod tests {
 			params.gas = gas;
 			let mut substate = Substate::new();
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			let res = ex.call(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer).unwrap();
+			let res = ex.call(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer, deepmind::Context::noop()).unwrap();
 
 			(res, substate.sstore_clears_refund, gas)
 		};
@@ -2268,7 +2280,7 @@ mod tests {
 		let FinalizationResult { gas_left: result, return_data, .. } = {
 			let schedule = machine.schedule(info.number);
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			ex.call(params.clone(), &mut Substate::new(), &mut NoopTracer, &mut NoopVMTracer).unwrap()
+			ex.call(params.clone(), &mut Substate::new(), &mut NoopTracer, &mut NoopVMTracer, deepmind::Context::noop()).unwrap()
 		};
 		(&mut output).copy_from_slice(&return_data[..(cmp::min(20, return_data.len()))]);
 
@@ -2282,7 +2294,7 @@ mod tests {
 		let mut output = [0u8; 20];
 		let FinalizationResult { gas_left: result, return_data, .. } = {
 			let schedule = machine.schedule(info.number);
-			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
+			let mut ex = Executive::new(&mut state, &info, &machine, &schedule, deepmind::Context::noop());
 			ex.call(params, &mut Substate::new(), &mut NoopTracer, &mut NoopVMTracer).unwrap()
 		};
 		(&mut output[..((cmp::min(20, return_data.len())))]).copy_from_slice(&return_data[..(cmp::min(20, return_data.len()))]);

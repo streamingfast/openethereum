@@ -14,6 +14,7 @@ builtin = { package = "ethcore-builtin", path = "../builtin" }
 bytes = { package = "parity-bytes", version = "0.1.0" }
 clique = { path = "../engines/clique" }
 common-types = { path = "../types" }
+deepmind = { path = "../../deepmind" }
 engine = { path = "../engine" }
 ethash = { path = "../../ethash" }
 ethash-engine = { path = "../engines/ethash" }

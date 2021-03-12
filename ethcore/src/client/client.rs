@@ -666,7 +666,7 @@ impl Importer {
 							let machine = self.engine.machine();
 							let schedule = machine.schedule(env_info.number);
 							let res = Executive::new(&mut state, &env_info, &machine, &schedule)
-								.transact(&transaction, options);
+								.transact(&transaction, options, &self.dm_context);
 
 							match res {
 								Err(e) => {
@@ -1278,7 +1278,7 @@ impl Client {
 			let original_state = if state_diff { Some(state.clone()) } else { None };
 			let schedule = machine.schedule(env_info.number);
 
-			let mut ret = Executive::new(state, env_info, &machine, &schedule).transact_virtual(transaction, options)?;
+			let mut ret = Executive::new(state, env_info, &machine, &schedule).transact_virtual(transaction, options, &deepmind::Context::noop())?;
 
 			if let Some(original) = original_state {
 				ret.state_diff = Some(state.diff_from(original).map_err(ExecutionError::from)?);
@@ -1619,7 +1619,7 @@ impl Call for Client {
 			let machine = self.engine.machine();
 			let schedule = machine.schedule(env_info.number);
 			Executive::new(&mut clone, &env_info, &machine, &schedule)
-				.transact_virtual(&tx, options())
+				.transact_virtual(&tx, options(), &deepmind::Context::noop())
 		};
 
 		let cond = |gas| {

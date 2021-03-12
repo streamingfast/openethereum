@@ -193,7 +193,7 @@ pub fn generate_dummy_client_with_spec_and_data<F>(
 				data: vec![],
 				value: U256::zero(),
 			}.sign(kp.secret(), Some(test_spec.chain_id()));
-			b.push_transaction(signed_tx).unwrap();
+			b.push_transaction(signed_tx, deepmind::Context::noop()).unwrap();
 			n += 1;
 		}
 
@@ -250,7 +250,7 @@ pub fn push_block_with_transactions(client: &Arc<Client>, transactions: &[Signed
 	b.set_timestamp(block_number * 10);
 
 	for t in transactions {
-		b.push_transaction(t.clone()).unwrap();
+		b.push_transaction(t.clone(), deepmind::Context::noop()).unwrap();
 	}
 	let b = b.close_and_lock().unwrap().seal(test_engine, vec![]).unwrap();
 

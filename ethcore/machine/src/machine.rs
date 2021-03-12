@@ -170,7 +170,7 @@ impl Machine {
 		let mut ex = Executive::new(&mut state, &env_info, self, &schedule);
 		let mut substate = Substate::new();
 
-		let res = ex.call(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer).map_err(|e| EngineError::FailedSystemCall(format!("{}", e)))?;
+		let res = ex.call(params, &mut substate, &mut NoopTracer, &mut NoopVMTracer, &deepmind::Context::noop()).map_err(|e| EngineError::FailedSystemCall(format!("{}", e)))?;
 		let output = res.return_data.to_vec();
 
 		Ok(output)
