@@ -870,6 +870,7 @@ dependencies = [
  "common-types",
  "ethereum-types",
  "rustc-hex 2.1.0",
+ "vm",
 ]
 
 [[package]]

@@ -5,6 +5,7 @@ extern crate rustc_hex;
 use std::{borrow::Borrow, fmt::{self, LowerHex}, sync::atomic::{AtomicBool, Ordering}};
 use rustc_hex::{ToHex};
 use types::{BlockNumber, header::Header, transaction::{Action, SignedTransaction, UnverifiedTransaction}};
+use vm::{ActionParams, ActionType, ActionValue, ReturnData};
 
 // This set of variables/functions are unused for now, will see how far we need them or not
 static ENABLED: AtomicBool = AtomicBool::new(true);
@@ -130,7 +131,7 @@ impl Context {
         let trx = t.as_unsigned();
         let mut to = ".".to_owned();
         if let Action::Call(ref address) = trx.action {
-            to = format!("{:x}", address);
+            to = format!("{:x}", Address(&address));
         }
 
         self.printer.print(format!("BEGIN_APPLY_TRX {hash:x} {to} {value:x} {v:x} {r:x} {s:x} {gas_limit} {gas_price:x} {nonce} {data:x}",
@@ -152,6 +153,63 @@ impl Context {
     pub fn end_transaction(&self) {
         self.printer.print(format!("END_TRX").as_ref())
     }
+
+    pub fn start_call(&self, params: &ActionParams) {
+        self.printer.print(format!("EVM_RUN_CALL {call_type} {call_index}",
+            call_type = CallType(&params.action_type),
+            call_index = 0,
+        ).as_ref());
+
+        let mut value = ".".to_owned();
+        if let ActionValue::Transfer(ref amount) = params.value {
+            value = format!("{:x}", U256(amount));
+        }
+
+        let mut input = ".".to_owned();
+        if let Some(ref bytes) = params.data {
+            input = format!("{:x}", Hex(bytes));
+        }
+
+        self.printer.print(format!("EVM_PARAM {call_type} {call_index} {from:x} {to:x} {value} {gas_limit} {input}",
+            call_type = CallType(&params.action_type),
+            call_index = 0,
+            from = Address(&params.sender),
+            to = Address(&params.address),
+            value = value,
+            gas_limit = params.gas.as_u64(),
+            input = input,
+        ).as_ref());
+    }
+
+    pub fn revert_call(&self) {
+        self.printer.print(format!("EVM_REVERTED {call_index}",
+            call_index = 0,
+        ).as_ref());
+    }
+
+    pub fn end_call(&self, gas_left: &ethereum_types::U256, return_data: &vm::ReturnData ) {
+        let bytes: &[u8]= return_data;
+        let mut return_value = ".".to_owned();
+        if bytes.len() > 0 {
+            return_value = format!("{:x}", Hex(bytes));
+        }
+
+        self.printer.print(format!("EVM_END_CALL {call_index} {gas_left:} {return_value}",
+            call_index = 0,
+            gas_left = gas_left.as_u64(),
+            return_value = return_value,
+        ).as_ref());
+    }
+
+    pub fn end_failed_call(&self, gas_left: &ethereum_types::U256, err: &vm::Error) {
+        self.printer.print(format!("EVM_CALL_FAILED {call_index} {gas_left} {reason}",
+            call_index = 0,
+            gas_left = gas_left.as_u64(),
+            reason = err,
+        ).as_ref());
+
+        self.end_call(gas_left, &ReturnData::empty())
+    }
 }
 
 struct Address<'a>(&'a ethereum_types::Address);
@@ -166,7 +224,24 @@ impl fmt::LowerHex for Address<'_> {
     }
 }
 
-struct Hex<'a>(&'a Vec<u8>);
+struct CallType<'a>(&'a ActionType);
+
+impl fmt::Display for CallType<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+       let type_name = match self.0 {
+           ActionType::Call => "CALL",
+           ActionType::CallCode => "CALLCODE",
+           ActionType::Create => "CREATE",
+           ActionType::Create2 => "CREATE",
+           ActionType::DelegateCall => "DELEGATE",
+           ActionType::StaticCall => "STATIC",
+       };
+
+       return f.write_str(type_name)
+    }
+}
+
+struct Hex<'a>(&'a [u8]);
 
 impl fmt::LowerHex for Hex<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
