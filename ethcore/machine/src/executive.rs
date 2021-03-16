@@ -964,7 +964,10 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		vm_tracer: &mut V,
 		dm_context: &deepmind::Context,
 	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
-		dm_context.start_call(&params);
+
+		if dm_context.is_enabled() {
+			dm_context.start_call(&params);
+		}
 
 		tracer.prepare_trace_call(&params, self.depth, self.machine.builtin(&params.address, self.info.number).is_some());
 		vm_tracer.prepare_subtrace(params.code.as_ref().map_or_else(|| &[] as &[u8], |d| &*d as &[u8]));
@@ -984,11 +987,13 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		).consume(self.state, substate, tracer, vm_tracer, dm_context);
 
 		if let Ok(ref val) = result {
-			if !val.apply_state {
-				dm_context.revert_call();
-			}
+			if dm_context.is_enabled() {
+				if !val.apply_state {
+					dm_context.revert_call();
+				}
 
-			dm_context.end_call(&val.gas_left, &val.return_data);
+				dm_context.end_call(&val.gas_left, &val.return_data);
+			}
 		};
 
 		match result {
@@ -1002,7 +1007,9 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 				tracer.done_trace_failed(&vm::Error::Reverted);
 			},
 			Err(ref err) => {
-				dm_context.end_failed_call(&U256::from(0), err);
+				if dm_context.is_enabled() {
+					dm_context.end_failed_call(&U256::from(0), err);
+				}
 				tracer.done_trace_failed(err);
 			},
 		}
@@ -1067,7 +1074,9 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		vm_tracer: &mut V,
 		dm_context: &deepmind::Context,
 	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
-		dm_context.start_call(&params);
+		if dm_context.is_enabled() {
+			dm_context.start_call(&params);
+		}
 
 		tracer.prepare_trace_create(&params);
 		vm_tracer.prepare_subtrace(params.code.as_ref().map_or_else(|| &[] as &[u8], |d| &*d as &[u8]));
@@ -1088,11 +1097,13 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		).consume(self.state, substate, tracer, vm_tracer, dm_context);
 
 		if let Ok(ref val) = result {
-			if !val.apply_state {
-				dm_context.revert_call();
-			}
+			if dm_context.is_enabled() {
+				if !val.apply_state {
+					dm_context.revert_call();
+				}
 
-			dm_context.end_call(&val.gas_left, &val.return_data);
+				dm_context.end_call(&val.gas_left, &val.return_data);
+			}
 		};
 
 		match result {
@@ -1107,7 +1118,9 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 				tracer.done_trace_failed(&vm::Error::Reverted);
 			},
 			Err(ref err) => {
-				dm_context.end_failed_call(&U256::from(0), err);
+				if dm_context.is_enabled() {
+					dm_context.end_failed_call(&U256::from(0), err);
+				}
 				tracer.done_trace_failed(err);
 			},
 		}
