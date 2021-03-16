@@ -2,7 +2,7 @@ extern crate common_types as types;
 extern crate ethereum_types;
 extern crate rustc_hex;
 
-use std::{borrow::Borrow, fmt::{self, LowerHex}, sync::atomic::{AtomicBool, Ordering}};
+use std::{borrow::Borrow, fmt::{self, LowerHex}, sync::{Arc, atomic::{AtomicBool, Ordering}}};
 use rustc_hex::{ToHex};
 use types::{BlockNumber, header::Header, transaction::{Action, SignedTransaction, UnverifiedTransaction}};
 use vm::{ActionParams, ActionType, ActionValue, ReturnData};
@@ -75,6 +75,133 @@ impl Printer for IoPrinter {
     }
 }
 
+
+pub trait Tracer: Send {
+    fn is_enabled(&self) -> bool { false }
+    fn start_call(&mut self, _params: &ActionParams) {}
+    fn reverted_call(&self, _gas_left: &ethereum_types::U256) {}
+    fn failed_call(&mut self, _gas_left: &ethereum_types::U256, _gas_left_after_failure: &ethereum_types::U256, _err: &vm::Error) {}
+    fn end_call(&mut self, _gas_left: &ethereum_types::U256, _return_data: &vm::ReturnData) {}
+    fn end_failed_call(&mut self, _err: &vm::Error) {}
+}
+
+pub struct NoopTracer;
+
+impl Tracer for NoopTracer {
+}
+
+/// Tracer is responsible of transaction tracing level with mutability like the ability to track the
+/// actual call index we are currently at. Aside mutability and state, it delegates all Deep Mind
+/// printing operations to the `Context`.
+pub struct TransactionTracer {
+    printer: Arc<Box<dyn Printer>>,
+    call_index: u32,
+    call_stack: Vec<u32>,
+    gas_left_after_latest_failure: Option<ethereum_types::U256>,
+}
+
+impl Tracer for TransactionTracer {
+    fn is_enabled(&self) -> bool {
+        return true;
+    }
+
+    fn start_call(&mut self, params: &ActionParams) {
+        self.call_index += 1;
+        self.call_stack.push(self.call_index);
+
+        self.printer.print(format!("EVM_RUN_CALL {call_type} {call_index}",
+            call_type = CallType(&params.action_type),
+            call_index = self.call_index,
+        ).as_ref());
+
+        let mut value = ".".to_owned();
+        if let ActionValue::Transfer(ref amount) = params.value {
+            value = format!("{:x}", U256(amount));
+        }
+
+        let mut input = ".".to_owned();
+        if let Some(ref bytes) = params.data {
+            input = format!("{:x}", Hex(bytes));
+        }
+
+        self.printer.print(format!("EVM_PARAM {call_type} {call_index} {from:x} {to:x} {value} {gas_limit} {input}",
+            call_type = CallType(&params.action_type),
+            call_index = self.call_index,
+            from = Address(&params.sender),
+            to = Address(&params.code_address),
+            value = value,
+            gas_limit = params.gas.as_u64(),
+            input = input,
+        ).as_ref());
+    }
+
+    fn reverted_call(&self, gas_left: &ethereum_types::U256) {
+        self.printer.print(format!("EVM_CALL_FAILED {call_index} {gas_left} {reason}",
+            call_index = self.active_call_index(),
+            gas_left = gas_left.as_u64(),
+            reason = vm::Error::Reverted,
+        ).as_ref());
+
+        self.printer.print(format!("EVM_REVERTED {call_index}",
+            call_index = self.active_call_index(),
+        ).as_ref());
+    }
+
+    fn failed_call(&mut self, gas_left: &ethereum_types::U256, gas_left_after_failure: &ethereum_types::U256, err: &vm::Error) {
+        if self.gas_left_after_latest_failure.is_some() {
+            panic!("There is already a gas_left_after_latest_failure value set at this point that should have been consumed already")
+        }
+
+        self.printer.print(format!("EVM_CALL_FAILED {call_index} {gas_left} {reason}",
+            call_index = self.active_call_index(),
+            gas_left = gas_left.as_u64(),
+            reason = err,
+        ).as_ref());
+
+        self.gas_left_after_latest_failure = Some(*gas_left_after_failure);
+    }
+
+    fn end_call(&mut self, gas_left: &ethereum_types::U256, return_data: &vm::ReturnData) {
+       let call_index = match self.call_stack.pop() {
+           Some(index) => index,
+           None => panic!("There should always be a call in our call index stack")
+       };
+
+        let bytes: &[u8]= return_data;
+        let mut return_value = ".".to_owned();
+        if bytes.len() > 0 {
+            return_value = format!("{:x}", Hex(bytes));
+        }
+
+        self.printer.print(format!("EVM_END_CALL {call_index} {gas_left:} {return_value}",
+            call_index = call_index,
+            gas_left = gas_left.as_u64(),
+            return_value = return_value,
+        ).as_ref());
+    }
+
+    fn end_failed_call(&mut self, err: &vm::Error) {
+        let gas_left = match self.gas_left_after_latest_failure {
+            Some(amount) => amount,
+            None => panic!("There should be a gas_left_after_latest_failure value set at this point")
+        };
+
+        self.gas_left_after_latest_failure = None;
+
+        self.end_call(&gas_left, &ReturnData::empty())
+    }
+}
+
+impl TransactionTracer {
+    fn active_call_index(&self) -> u32 {
+        if self.call_stack.len() <= 0 {
+            panic!("There should be an active call in the call index stack")
+        }
+
+        self.call_stack[self.call_stack.len() - 1]
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Instrumentation {
     Full,
@@ -84,7 +211,7 @@ pub enum Instrumentation {
 
 pub struct Context {
     instrumentation: Instrumentation,
-    printer: Box<dyn Printer>,
+    printer: Arc<Box<dyn Printer>>,
 }
 
 impl Context {
@@ -92,15 +219,19 @@ impl Context {
         Context {
             instrumentation,
             // printer: Box::new(IoPrinter{io: Box::new(std::io::stdout())}),
-            printer: Box::new(IoPrinter{}),
+            printer: Arc::new(Box::new(IoPrinter{})),
         }
     }
 
     pub fn noop() -> Context {
         Context {
             instrumentation: Instrumentation::None,
-            printer: Box::new(DiscardPrinter{}),
+            printer: Arc::new(Box::new(DiscardPrinter{})),
         }
+    }
+
+    pub fn tracer(&self) -> TransactionTracer {
+        TransactionTracer{printer: self.printer.clone(), call_index: 0, call_stack: Vec::with_capacity(16), gas_left_after_latest_failure: None}
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -151,64 +282,7 @@ impl Context {
     }
 
     pub fn end_transaction(&self) {
-        self.printer.print(format!("END_TRX").as_ref())
-    }
-
-    pub fn start_call(&self, params: &ActionParams) {
-        self.printer.print(format!("EVM_RUN_CALL {call_type} {call_index}",
-            call_type = CallType(&params.action_type),
-            call_index = 0,
-        ).as_ref());
-
-        let mut value = ".".to_owned();
-        if let ActionValue::Transfer(ref amount) = params.value {
-            value = format!("{:x}", U256(amount));
-        }
-
-        let mut input = ".".to_owned();
-        if let Some(ref bytes) = params.data {
-            input = format!("{:x}", Hex(bytes));
-        }
-
-        self.printer.print(format!("EVM_PARAM {call_type} {call_index} {from:x} {to:x} {value} {gas_limit} {input}",
-            call_type = CallType(&params.action_type),
-            call_index = 0,
-            from = Address(&params.sender),
-            to = Address(&params.address),
-            value = value,
-            gas_limit = params.gas.as_u64(),
-            input = input,
-        ).as_ref());
-    }
-
-    pub fn revert_call(&self) {
-        self.printer.print(format!("EVM_REVERTED {call_index}",
-            call_index = 0,
-        ).as_ref());
-    }
-
-    pub fn end_call(&self, gas_left: &ethereum_types::U256, return_data: &vm::ReturnData ) {
-        let bytes: &[u8]= return_data;
-        let mut return_value = ".".to_owned();
-        if bytes.len() > 0 {
-            return_value = format!("{:x}", Hex(bytes));
-        }
-
-        self.printer.print(format!("EVM_END_CALL {call_index} {gas_left:} {return_value}",
-            call_index = 0,
-            gas_left = gas_left.as_u64(),
-            return_value = return_value,
-        ).as_ref());
-    }
-
-    pub fn end_failed_call(&self, gas_left: &ethereum_types::U256, err: &vm::Error) {
-        self.printer.print(format!("EVM_CALL_FAILED {call_index} {gas_left} {reason}",
-            call_index = 0,
-            gas_left = gas_left.as_u64(),
-            reason = err,
-        ).as_ref());
-
-        self.end_call(gas_left, &ReturnData::empty())
+        self.printer.print(format!("END_APPLY_TRX").as_ref())
     }
 }
 

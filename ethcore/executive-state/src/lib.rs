@@ -96,7 +96,7 @@ pub fn check_proof(
 	};
 
 	let options = TransactOptions::with_no_tracing().save_output_from_contract();
-	match execute(&mut state, env_info, machine, transaction, options, true, &deepmind::Context::noop()) {
+	match execute(&mut state, env_info, machine, transaction, options, true, deepmind::NoopTracer) {
 		Ok(executed) => ProvedExecution::Complete(Box::new(executed)),
 		Err(ExecutionError::Internal(_)) => ProvedExecution::BadProof,
 		Err(e) => ProvedExecution::Failed(e),
@@ -130,7 +130,7 @@ pub fn prove_transaction_virtual<H: AsHashDB<KeccakHasher, DBValue> + Send + Syn
 	};
 
 	let options = TransactOptions::with_no_tracing().dont_check_nonce().save_output_from_contract();
-	match execute(&mut state, env_info, machine, transaction, options, true, &deepmind::Context::noop()) {
+	match execute(&mut state, env_info, machine, transaction, options, true, deepmind::NoopTracer) {
 		Err(ExecutionError::Internal(_)) => None,
 		Err(e) => {
 			trace!(target: "state", "Proved call failed: {}", e);
@@ -155,17 +155,18 @@ pub trait ExecutiveState {
 
 	/// Execute a given transaction with given tracer and VM tracer producing a receipt and an optional trace.
 	/// This will change the state accordingly.
-	fn apply_with_tracing<T, V>(
+	fn apply_with_tracing<T, V, DM>(
 		&mut self,
 		env_info: &EnvInfo,
 		machine: &Machine,
 		t: &SignedTransaction,
 		options: TransactOptions<T, V>,
-		dm_context: &deepmind::Context,
+		dm_tracer: DM,
 	) -> ApplyResult<T::Output, V::Output>
 		where
 			T: trace::Tracer,
-			V: trace::VMTracer;
+			V: trace::VMTracer,
+			DM: deepmind::Tracer;
 }
 
 impl<B: Backend> ExecutiveState for State<B> {
@@ -181,28 +182,39 @@ impl<B: Backend> ExecutiveState for State<B> {
 	) -> ApplyResult<FlatTrace, VMTrace> {
 		if tracing {
 			let options = TransactOptions::with_tracing();
-			self.apply_with_tracing(env_info, machine, t, options, dm_context)
+
+			if dm_context.is_enabled() {
+				self.apply_with_tracing(env_info, machine, t, options, dm_context.tracer())
+			} else {
+				self.apply_with_tracing(env_info, machine, t, options, deepmind::NoopTracer)
+			}
 		} else {
 			let options = TransactOptions::with_no_tracing();
-			self.apply_with_tracing(env_info, machine, t, options, dm_context)
+
+			if dm_context.is_enabled() {
+				self.apply_with_tracing(env_info, machine, t, options, dm_context.tracer())
+			} else {
+				self.apply_with_tracing(env_info, machine, t, options, deepmind::NoopTracer)
+			}
 		}
 	}
 
 	/// Execute a given transaction with given tracer and VM tracer producing a receipt and an optional trace.
 	/// This will change the state accordingly.
-	fn apply_with_tracing<T, V>(
+	fn apply_with_tracing<T, V, DM>(
 		&mut self,
 		env_info: &EnvInfo,
 		machine: &Machine,
 		t: &SignedTransaction,
 		options: TransactOptions<T, V>,
-		dm_context: &deepmind::Context,
+		dm_tracer: DM,
 	) -> ApplyResult<T::Output, V::Output>
 		where
 			T: trace::Tracer,
 			V: trace::VMTracer,
+			DM: deepmind::Tracer,
 	{
-		let e = execute(self, env_info, machine, t, options, false, dm_context)?;
+		let e = execute(self, env_info, machine, t, options, false, dm_tracer)?;
 		let params = machine.params();
 
 		let eip658 = env_info.number >= params.eip658_transition;
@@ -238,26 +250,27 @@ impl<B: Backend> ExecutiveState for State<B> {
 //
 // `virt` signals that we are executing outside of a block set and restrictions like
 // gas limits and gas costs should be lifted.
-fn execute<B, T, V>(
+fn execute<B, T, V, DM>(
 	state: &mut State<B>,
 	env_info: &EnvInfo,
 	machine: &Machine,
 	t: &SignedTransaction,
 	options: TransactOptions<T, V>,
 	virt: bool,
-	dm_context: &deepmind::Context,
+	dm_tracer: DM,
 ) -> Result<RawExecuted<T::Output, V::Output>, ExecutionError>
 	where
 		B: Backend,
 		T: trace::Tracer,
 		V: trace::VMTracer,
+		DM: deepmind::Tracer,
 {
 	let schedule = machine.schedule(env_info.number);
 	let mut e = Executive::new(state, env_info, machine, &schedule);
 
 	match virt {
-		true => e.transact_virtual(t, options, dm_context),
-		false => e.transact(t, options, dm_context),
+		true => e.transact_virtual(t, options, dm_tracer),
+		false => e.transact(t, options, dm_tracer),
 	}
 }
 

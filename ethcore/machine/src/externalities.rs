@@ -77,7 +77,7 @@ impl OriginInfo {
 }
 
 /// Implementation of evm Externalities.
-pub struct Externalities<'a, T: 'a, V: 'a, B: 'a> {
+pub struct Externalities<'a, T: 'a, V: 'a, B: 'a, DM: 'a> {
 	state: &'a mut State<B>,
 	env_info: &'a EnvInfo,
 	depth: usize,
@@ -90,11 +90,11 @@ pub struct Externalities<'a, T: 'a, V: 'a, B: 'a> {
 	tracer: &'a mut T,
 	vm_tracer: &'a mut V,
 	static_flag: bool,
-	dm_context: &'a deepmind::Context,
+	dm_tracer: &'a mut DM,
 }
 
-impl<'a, T: 'a, V: 'a, B: 'a> Externalities<'a, T, V, B>
-	where T: Tracer, V: VMTracer, B: StateBackend
+impl<'a, T: 'a, V: 'a, B: 'a, DM: 'a> Externalities<'a, T, V, B, DM>
+	where T: Tracer, V: VMTracer, B: StateBackend, DM: deepmind::Tracer
 {
 	/// Basic `Externalities` constructor.
 	pub fn new(
@@ -110,7 +110,7 @@ impl<'a, T: 'a, V: 'a, B: 'a> Externalities<'a, T, V, B>
 		tracer: &'a mut T,
 		vm_tracer: &'a mut V,
 		static_flag: bool,
-		dm_context: &'a deepmind::Context,
+		dm_tracer: &'a mut DM,
 	) -> Self {
 		Externalities {
 			state,
@@ -125,13 +125,13 @@ impl<'a, T: 'a, V: 'a, B: 'a> Externalities<'a, T, V, B>
 			tracer,
 			vm_tracer,
 			static_flag,
-			dm_context,
+			dm_tracer,
 		}
 	}
 }
 
-impl<'a, T: 'a, V: 'a, B: 'a> Ext for Externalities<'a, T, V, B>
-	where T: Tracer, V: VMTracer, B: StateBackend
+impl<'a, T: 'a, V: 'a, B: 'a, DM: 'a> Ext for Externalities<'a, T, V, B, DM>
+	where T: Tracer, V: VMTracer, B: StateBackend, DM: deepmind::Tracer
 {
 	fn initial_storage_at(&self, key: &H256) -> vm::Result<H256> {
 		if self.state.is_base_storage_root_unchanged(&self.origin_info.address)? {
@@ -200,7 +200,7 @@ impl<'a, T: 'a, V: 'a, B: 'a> Ext for Externalities<'a, T, V, B>
 			};
 
 			let mut ex = Executive::new(self.state, self.env_info, self.machine, self.schedule);
-			let r = ex.call_with_crossbeam(params, self.substate, self.stack_depth + 1, self.tracer, self.vm_tracer, self.dm_context);
+			let r = ex.call_with_crossbeam(params, self.substate, self.stack_depth + 1, self.tracer, self.vm_tracer, self.dm_tracer);
 			let output = match &r {
 				Ok(ref r) => H256::from_slice(&r.return_data[..32]),
 				_ => H256::zero(),
@@ -279,7 +279,7 @@ impl<'a, T: 'a, V: 'a, B: 'a> Ext for Externalities<'a, T, V, B>
 
 		// TODO: handle internal error separately
 		let mut ex = Executive::from_parent(self.state, self.env_info, self.machine, self.schedule, self.depth, self.static_flag);
-		let out = ex.create_with_crossbeam(params, self.substate, self.stack_depth + 1, self.tracer, self.vm_tracer, self.dm_context);
+		let out = ex.create_with_crossbeam(params, self.substate, self.stack_depth + 1, self.tracer, self.vm_tracer, self.dm_tracer);
 		Ok(into_contract_create_result(out, &address, self.substate))
 	}
 
@@ -330,7 +330,7 @@ impl<'a, T: 'a, V: 'a, B: 'a> Ext for Externalities<'a, T, V, B>
 		}
 
 		let mut ex = Executive::from_parent(self.state, self.env_info, self.machine, self.schedule, self.depth, self.static_flag);
-		let out = ex.call_with_crossbeam(params, self.substate, self.stack_depth + 1, self.tracer, self.vm_tracer, self.dm_context);
+		let out = ex.call_with_crossbeam(params, self.substate, self.stack_depth + 1, self.tracer, self.vm_tracer, self.dm_tracer);
 		Ok(into_message_call_result(out))
 	}
 

@@ -16,7 +16,7 @@
 
 //! Transaction Execution environment.
 
-use std::{cmp, convert::TryFrom, sync::Arc};
+use std::{borrow::Borrow, cmp, convert::TryFrom, sync::Arc};
 
 use crossbeam_utils::thread;
 use ethereum_types::{H256, U256, U512, Address};
@@ -337,7 +337,7 @@ impl<'a> CallCreateExecutive<'a> {
 		Ok(())
 	}
 
-	fn enact_result<B: 'a + StateBackend>(result: &vm::Result<FinalizationResult>, state: &mut State<B>, substate: &mut Substate, un_substate: Substate) {
+	fn enact_result<B: 'a + StateBackend, DM>(result: &vm::Result<FinalizationResult>, state: &mut State<B>, substate: &mut Substate, un_substate: Substate, dm_tracer: &mut DM) where DM: deepmind::Tracer {
 		match *result {
 			Err(vm::Error::OutOfGas)
 				| Err(vm::Error::BadJumpDestination {..})
@@ -348,8 +348,22 @@ impl<'a> CallCreateExecutive<'a> {
 				| Err(vm::Error::OutOfStack {..})
 				| Err(vm::Error::MutableCallInStaticContext)
 				| Err(vm::Error::OutOfBounds)
-				| Err(vm::Error::Reverted)
-				| Ok(FinalizationResult { apply_state: false, .. }) => {
+				| Err(vm::Error::Reverted) => {
+					if dm_tracer.is_enabled() {
+						// FIXME: This for now never happens in our Battlefield instrumentation testing. However, we should be
+						//        able to test out at least some of them here in Battlefield maybe via some Assembly to ensure
+						//        we have good coverage, the most important part is where to retrieve the gas left in those
+						//        cases ...
+						dm_tracer.reverted_call(&U256::from(987654321));
+					}
+
+					state.revert_to_checkpoint();
+			},
+			Ok(FinalizationResult { apply_state: false, ref gas_left, .. }) => {
+					if dm_tracer.is_enabled() {
+						dm_tracer.reverted_call(gas_left);
+					}
+
 					state.revert_to_checkpoint();
 			},
 			Ok(_) | Err(vm::Error::Internal(_)) => {
@@ -360,7 +374,7 @@ impl<'a> CallCreateExecutive<'a> {
 	}
 
 	/// Creates `Externalities` from `Executive`.
-	fn as_externalities<'any, B: 'any + StateBackend, T, V>(
+	fn as_externalities<'any, B: 'any + StateBackend, T, V, DM>(
 		state: &'any mut State<B>,
 		info: &'any EnvInfo,
 		machine: &'any Machine,
@@ -373,16 +387,16 @@ impl<'a> CallCreateExecutive<'a> {
 		output: OutputPolicy,
 		tracer: &'any mut T,
 		vm_tracer: &'any mut V,
-		dm_context: &'any deepmind::Context,
-	) -> Externalities<'any, T, V, B> where T: Tracer, V: VMTracer {
-		Externalities::new(state, info, machine, schedule, depth, stack_depth, origin_info, substate, output, tracer, vm_tracer, static_flag, dm_context)
+		dm_tracer: &'any mut DM,
+	) -> Externalities<'any, T, V, B, DM> where T: Tracer, V: VMTracer, DM: deepmind::Tracer {
+		Externalities::new(state, info, machine, schedule, depth, stack_depth, origin_info, substate, output, tracer, vm_tracer, static_flag, dm_tracer)
 	}
 
 	/// Execute the executive. If a sub-call/create action is required, a resume trap error is returned. The caller is
 	/// then expected to call `resume_call` or `resume_create` to continue the execution.
 	///
 	/// Current-level tracing is expected to be handled by caller.
-	pub fn exec<B: 'a + StateBackend, T: Tracer, V: VMTracer>(mut self, state: &mut State<B>, substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_context: &deepmind::Context) -> ExecutiveTrapResult<'a, FinalizationResult> {
+	pub fn exec<B: 'a + StateBackend, T: Tracer, V: VMTracer, DM: deepmind::Tracer>(mut self, state: &mut State<B>, substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_tracer: &mut DM) -> ExecutiveTrapResult<'a, FinalizationResult> {
 		match self.kind {
 			CallCreateExecutiveKind::Transfer(ref params) => {
 				assert!(!self.is_create);
@@ -422,6 +436,14 @@ impl<'a> CallCreateExecutive<'a> {
 							builtin.execute(data, &mut builtin_output)
 						};
 						if let Err(e) = result {
+							if dm_tracer.is_enabled() {
+								dm_tracer.failed_call(&(params.gas - cost), &U256::from(0), &vm::Error::BuiltIn(e));
+
+								// FIXME: Our Geth instrumentation does NOT emit a EVM_REVERTED here but I think it should, the call was
+								//        not applied thus reverted. But EVM_REVERTED could be there to convey the fact that it was
+								//        explicitely reverted which is not the case here...
+							}
+
 							state.revert_to_checkpoint();
 
 							Err(vm::Error::BuiltIn(e))
@@ -436,6 +458,14 @@ impl<'a> CallCreateExecutive<'a> {
 							})
 						}
 					} else {
+						if dm_tracer.is_enabled() {
+							dm_tracer.failed_call(&U256::from(0), &U256::from(0), &vm::Error::OutOfGas);
+
+							// FIXME: Our Geth instrumentation does NOT emit a EVM_REVERTED here but I think it should, the call was
+							//        not applied thus reverted. But EVM_REVERTED could be there to convey the fact that it was
+							//        explicitely reverted which is not the case here...
+						}
+
 						// just drain the whole gas
 						state.revert_to_checkpoint();
 
@@ -471,7 +501,7 @@ impl<'a> CallCreateExecutive<'a> {
 
 				let out = match exec {
 					Some(exec) => {
-						let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, OutputPolicy::Return, tracer, vm_tracer, dm_context);
+						let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, OutputPolicy::Return, tracer, vm_tracer, dm_tracer);
 						match exec.exec(&mut ext) {
 							Ok(val) => Ok(val.finalize(ext)),
 							Err(err) => Err(err),
@@ -492,7 +522,7 @@ impl<'a> CallCreateExecutive<'a> {
 					},
 				};
 
-				Self::enact_result(&res, state, substate, unconfirmed_substate);
+				Self::enact_result(&res, state, substate, unconfirmed_substate, dm_tracer);
 				Ok(res)
 			},
 			CallCreateExecutiveKind::ExecCreate(params, mut unconfirmed_substate) => {
@@ -522,7 +552,7 @@ impl<'a> CallCreateExecutive<'a> {
 
 				let out = match exec {
 					Some(exec) => {
-						let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, OutputPolicy::InitContract, tracer, vm_tracer, dm_context);
+						let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, OutputPolicy::InitContract, tracer, vm_tracer, dm_tracer);
 						match exec.exec(&mut ext) {
 							Ok(val) => Ok(val.finalize(ext)),
 							Err(err) => Err(err),
@@ -543,7 +573,7 @@ impl<'a> CallCreateExecutive<'a> {
 					},
 				};
 
-				Self::enact_result(&res, state, substate, unconfirmed_substate);
+				Self::enact_result(&res, state, substate, unconfirmed_substate, dm_tracer);
 				Ok(res)
 			},
 			CallCreateExecutiveKind::ResumeCall(..) | CallCreateExecutiveKind::ResumeCreate(..) => panic!("This executive has already been executed once."),
@@ -553,13 +583,13 @@ impl<'a> CallCreateExecutive<'a> {
 	/// Resume execution from a call trap previsouly trapped by `exec`.
 	///
 	/// Current-level tracing is expected to be handled by caller.
-	pub fn resume_call<B: 'a + StateBackend, T: Tracer, V: VMTracer>(mut self, result: vm::MessageCallResult, state: &mut State<B>, substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_context: &deepmind::Context) -> ExecutiveTrapResult<'a, FinalizationResult> {
+	pub fn resume_call<B: 'a + StateBackend, T: Tracer, V: VMTracer, DM: deepmind::Tracer>(mut self, result: vm::MessageCallResult, state: &mut State<B>, substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_tracer: &mut DM) -> ExecutiveTrapResult<'a, FinalizationResult> {
 		match self.kind {
 			CallCreateExecutiveKind::ResumeCall(origin_info, resume, mut unconfirmed_substate) => {
 				let out = {
 					let exec = resume.resume_call(result);
 
-					let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, if self.is_create { OutputPolicy::InitContract } else { OutputPolicy::Return }, tracer, vm_tracer, dm_context);
+					let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, if self.is_create { OutputPolicy::InitContract } else { OutputPolicy::Return }, tracer, vm_tracer, dm_tracer);
 					match exec.exec(&mut ext) {
 						Ok(val) => Ok(val.finalize(ext)),
 						Err(err) => Err(err),
@@ -578,7 +608,7 @@ impl<'a> CallCreateExecutive<'a> {
 					},
 				};
 
-				Self::enact_result(&res, state, substate, unconfirmed_substate);
+				Self::enact_result(&res, state, substate, unconfirmed_substate, dm_tracer);
 				Ok(res)
 			},
 			CallCreateExecutiveKind::ResumeCreate(..) =>
@@ -592,13 +622,13 @@ impl<'a> CallCreateExecutive<'a> {
 	/// Resume execution from a create trap previsouly trapped by `exec`.
 	///
 	/// Current-level tracing is expected to be handled by caller.
-	pub fn resume_create<B: 'a + StateBackend, T: Tracer, V: VMTracer>(mut self, result: vm::ContractCreateResult, state: &mut State<B>, substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_context: &deepmind::Context) -> ExecutiveTrapResult<'a, FinalizationResult> {
+	pub fn resume_create<B: 'a + StateBackend, T: Tracer, V: VMTracer, DM: deepmind::Tracer>(mut self, result: vm::ContractCreateResult, state: &mut State<B>, substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_tracer: &mut DM) -> ExecutiveTrapResult<'a, FinalizationResult> {
 		match self.kind {
 			CallCreateExecutiveKind::ResumeCreate(origin_info, resume, mut unconfirmed_substate) => {
 				let out = {
 					let exec = resume.resume_create(result);
 
-					let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, if self.is_create { OutputPolicy::InitContract } else { OutputPolicy::Return }, tracer, vm_tracer, dm_context);
+					let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, if self.is_create { OutputPolicy::InitContract } else { OutputPolicy::Return }, tracer, vm_tracer, dm_tracer);
 					match exec.exec(&mut ext) {
 						Ok(val) => Ok(val.finalize(ext)),
 						Err(err) => Err(err),
@@ -617,7 +647,7 @@ impl<'a> CallCreateExecutive<'a> {
 					},
 				};
 
-				Self::enact_result(&res, state, substate, unconfirmed_substate);
+				Self::enact_result(&res, state, substate, unconfirmed_substate, dm_tracer);
 				Ok(res)
 			},
 			CallCreateExecutiveKind::ResumeCall(..) =>
@@ -629,8 +659,8 @@ impl<'a> CallCreateExecutive<'a> {
 	}
 
 	/// Execute and consume the current executive. This function handles resume traps and sub-level tracing. The caller is expected to handle current-level tracing.
-	pub fn consume<B: 'a + StateBackend, T: Tracer, V: VMTracer>(self, state: &mut State<B>, top_substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_context: &deepmind::Context) -> vm::Result<FinalizationResult> {
-		let mut last_res = Some((false, self.gas, self.exec(state, top_substate, tracer, vm_tracer, dm_context)));
+	pub fn consume<B: 'a + StateBackend, T: Tracer, V: VMTracer, DM: deepmind::Tracer>(self, state: &mut State<B>, top_substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_tracer: &mut DM) -> vm::Result<FinalizationResult> {
+		let mut last_res = Some((false, self.gas, self.exec(state, top_substate, tracer, vm_tracer, dm_tracer)));
 
 		let mut callstack: Vec<(Option<Address>, CallCreateExecutive<'a>)> = Vec::new();
 		loop {
@@ -644,7 +674,7 @@ impl<'a> CallCreateExecutive<'a> {
 								None => top_substate,
 							};
 
-							last_res = Some((exec.is_create, exec.gas, exec.exec(state, parent_substate, tracer, vm_tracer, dm_context)));
+							last_res = Some((exec.is_create, exec.gas, exec.exec(state, parent_substate, tracer, vm_tracer, dm_tracer)));
 						},
 						None => panic!("When callstack only had one item and it was executed, this function would return; callstack never reaches zero item; qed"),
 					}
@@ -656,6 +686,12 @@ impl<'a> CallCreateExecutive<'a> {
 						Some((address, mut exec)) => {
 							if is_create {
 								let address = address.expect("If the last executed status was from a create executive, then the destination address was pushed to the callstack; address is_some if it is_create; qed");
+
+								if dm_tracer.is_enabled() {
+									if let Ok(ref val) = val {
+										dm_tracer.end_call(&val.gas_left, &val.return_data);
+									}
+								}
 
 								match val {
 									Ok(ref val) if val.apply_state => {
@@ -670,6 +706,10 @@ impl<'a> CallCreateExecutive<'a> {
 									},
 									Err(ref err) => {
 										tracer.done_trace_failed(err);
+
+										if dm_tracer.is_enabled() {
+											dm_tracer.end_failed_call(err);
+										}
 									},
 								}
 
@@ -688,9 +728,15 @@ impl<'a> CallCreateExecutive<'a> {
 									parent_substate,
 									tracer,
 									vm_tracer,
-									dm_context,
+									dm_tracer,
 								)));
 							} else {
+								if dm_tracer.is_enabled() {
+									if let Ok(ref val) = val {
+										dm_tracer.end_call(&val.gas_left, &val.return_data);
+									};
+								}
+
 								match val {
 									Ok(ref val) if val.apply_state => {
 										tracer.done_trace_call(
@@ -703,6 +749,10 @@ impl<'a> CallCreateExecutive<'a> {
 									},
 									Err(ref err) => {
 										tracer.done_trace_failed(err);
+
+										if dm_tracer.is_enabled() {
+											dm_tracer.end_failed_call(err);
+										}
 									},
 								}
 
@@ -720,7 +770,7 @@ impl<'a> CallCreateExecutive<'a> {
 									parent_substate,
 									tracer,
 									vm_tracer,
-									dm_context,
+									dm_tracer,
 								)));
 							}
 						},
@@ -728,6 +778,10 @@ impl<'a> CallCreateExecutive<'a> {
 					}
 				},
 				Some((_, _, Err(TrapError::Call(subparams, resume)))) => {
+					if dm_tracer.is_enabled() {
+						dm_tracer.start_call(&subparams);
+					}
+
 					tracer.prepare_trace_call(&subparams, resume.depth + 1, resume.machine.builtin(&subparams.address, resume.info.number).is_some());
 					vm_tracer.prepare_subtrace(subparams.code.as_ref().map_or_else(|| &[] as &[u8], |d| &*d as &[u8]));
 
@@ -747,6 +801,10 @@ impl<'a> CallCreateExecutive<'a> {
 					last_res = None;
 				},
 				Some((_, _, Err(TrapError::Create(subparams, address, resume)))) => {
+					if dm_tracer.is_enabled() {
+						dm_tracer.start_call(&subparams);
+					}
+
 					tracer.prepare_trace_create(&subparams);
 					vm_tracer.prepare_subtrace(subparams.code.as_ref().map_or_else(|| &[] as &[u8], |d| &*d as &[u8]));
 
@@ -806,8 +864,8 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 	}
 
 	/// This function should be used to execute transaction.
-	pub fn transact<T, V>(&'a mut self, t: &SignedTransaction, options: TransactOptions<T, V>, dm_context: &deepmind::Context)
-		-> Result<Executed<T::Output, V::Output>, ExecutionError> where T: Tracer, V: VMTracer,
+	pub fn transact<T, V, DM>(&'a mut self, t: &SignedTransaction, options: TransactOptions<T, V>, dm_tracer: DM)
+		-> Result<Executed<T::Output, V::Output>, ExecutionError> where T: Tracer, V: VMTracer, DM: deepmind::Tracer
 	{
 		self.transact_with_tracer(
 			t,
@@ -815,15 +873,15 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 			options.output_from_init_contract,
 			options.tracer,
 			options.vm_tracer,
-			dm_context
+			dm_tracer,
 		)
 	}
 
 	/// Execute a transaction in a "virtual" context.
 	/// This will ensure the caller has enough balance to execute the desired transaction.
 	/// Used for extra-block executions for things like consensus contracts and RPCs
-	pub fn transact_virtual<T, V>(&'a mut self, t: &SignedTransaction, options: TransactOptions<T, V>, dm_context: &deepmind::Context)
-		-> Result<Executed<T::Output, V::Output>, ExecutionError> where T: Tracer, V: VMTracer,
+	pub fn transact_virtual<T, V, DM>(&'a mut self, t: &SignedTransaction, options: TransactOptions<T, V>, dm_tracer: DM)
+		-> Result<Executed<T::Output, V::Output>, ExecutionError> where T: Tracer, V: VMTracer, DM: deepmind::Tracer
 	{
 		let sender = t.sender();
 		let balance = self.state.balance(&sender)?;
@@ -833,19 +891,19 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 			self.state.add_balance(&sender, &(needed_balance - balance), CleanupMode::NoEmpty)?;
 		}
 
-		self.transact(t, options, dm_context)
+		self.transact(t, options, dm_tracer)
 	}
 
 	/// Execute transaction/call with tracing enabled
-	fn transact_with_tracer<T, V>(
+	fn transact_with_tracer<T, V, DM>(
 		&'a mut self,
 		t: &SignedTransaction,
 		check_nonce: bool,
 		output_from_create: bool,
 		mut tracer: T,
 		mut vm_tracer: V,
-		dm_context: &deepmind::Context,
-	) -> Result<Executed<T::Output, V::Output>, ExecutionError> where T: Tracer, V: VMTracer {
+		mut dm_tracer: DM,
+	) -> Result<Executed<T::Output, V::Output>, ExecutionError> where T: Tracer, V: VMTracer, DM: deepmind::Tracer {
 		let sender = t.sender();
 		let nonce = self.state.nonce(&sender)?;
 
@@ -915,7 +973,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 					action_type: ActionType::Create,
 					params_type: vm::ParamsType::Embedded,
 				};
-				let res = self.create(params, &mut substate, &mut tracer, &mut vm_tracer, dm_context);
+				let res = self.create(params, &mut substate, &mut tracer, &mut vm_tracer, &mut dm_tracer);
 				let out = match &res {
 					Ok(res) if output_from_create => res.return_data.to_vec(),
 					_ => Vec::new(),
@@ -938,7 +996,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 					action_type: ActionType::Call,
 					params_type: vm::ParamsType::Separate,
 				};
-				let res = self.call(params, &mut substate, &mut tracer, &mut vm_tracer, dm_context);
+				let res = self.call(params, &mut substate, &mut tracer, &mut vm_tracer, &mut dm_tracer);
 				let out = match &res {
 					Ok(res) => res.return_data.to_vec(),
 					_ => Vec::new(),
@@ -948,25 +1006,24 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		};
 
 		// finalize here!
-		Ok(self.finalize(t, substate, result, output, tracer.drain(), vm_tracer.drain(), dm_context)?)
+		Ok(self.finalize(t, substate, result, output, tracer.drain(), vm_tracer.drain(), &mut dm_tracer)?)
 	}
 
 	/// Calls contract function with given contract params and stack depth.
 	/// NOTE. It does not finalize the transaction (doesn't do refunds, nor suicides).
 	/// Modifies the substate and the output.
 	/// Returns either gas_left or `vm::Error`.
-	pub fn call_with_stack_depth<T, V>(
+	pub fn call_with_stack_depth<T, V, DM>(
 		&mut self,
 		params: ActionParams,
 		substate: &mut Substate,
 		stack_depth: usize,
 		tracer: &mut T,
 		vm_tracer: &mut V,
-		dm_context: &deepmind::Context,
-	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
-
-		if dm_context.is_enabled() {
-			dm_context.start_call(&params);
+		dm_tracer: &mut DM,
+	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer, DM: deepmind::Tracer {
+		if dm_tracer.is_enabled() {
+			dm_tracer.start_call(&params);
 		}
 
 		tracer.prepare_trace_call(&params, self.depth, self.machine.builtin(&params.address, self.info.number).is_some());
@@ -984,17 +1041,13 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 			self.depth,
 			stack_depth,
 			self.static_flag,
-		).consume(self.state, substate, tracer, vm_tracer, dm_context);
+		).consume(self.state, substate, tracer, vm_tracer, dm_tracer);
 
-		if let Ok(ref val) = result {
-			if dm_context.is_enabled() {
-				if !val.apply_state {
-					dm_context.revert_call();
-				}
-
-				dm_context.end_call(&val.gas_left, &val.return_data);
-			}
-		};
+		if dm_tracer.is_enabled() {
+			if let Ok(ref val) = result {
+				dm_tracer.end_call(&val.gas_left, &val.return_data);
+			};
+		}
 
 		match result {
 			Ok(ref val) if val.apply_state => {
@@ -1007,10 +1060,11 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 				tracer.done_trace_failed(&vm::Error::Reverted);
 			},
 			Err(ref err) => {
-				if dm_context.is_enabled() {
-					dm_context.end_failed_call(&U256::from(0), err);
-				}
 				tracer.done_trace_failed(err);
+
+				if dm_tracer.is_enabled() {
+					dm_tracer.end_failed_call(err);
+				}
 			},
 		}
 		vm_tracer.done_subtrace();
@@ -1020,27 +1074,27 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 
 	/// Calls contract function with given contract params, if the stack depth is above a threshold, create a new thread
 	/// to execute it.
-	pub fn call_with_crossbeam<T, V>(
+	pub fn call_with_crossbeam<T, V, DM>(
 		&mut self,
 		params: ActionParams,
 		substate: &mut Substate,
 		stack_depth: usize,
 		tracer: &mut T,
 		vm_tracer: &mut V,
-		dm_context: &deepmind::Context,
-	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
+		dm_tracer: &mut DM,
+	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer, DM: deepmind::Tracer {
 		let local_stack_size = ethcore_io::LOCAL_STACK_SIZE.with(|sz| sz.get());
 		let depth_threshold = local_stack_size.saturating_sub(STACK_SIZE_ENTRY_OVERHEAD) / STACK_SIZE_PER_DEPTH;
 
 		if stack_depth != depth_threshold {
-			self.call_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer, dm_context)
+			self.call_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer, dm_tracer)
 		} else {
 			thread::scope(|scope| {
 				let stack_size = cmp::max(self.schedule.max_depth.saturating_sub(depth_threshold) * STACK_SIZE_PER_DEPTH, local_stack_size);
 				scope.builder()
 					.stack_size(stack_size)
 					.spawn(|_| {
-						self.call_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer, dm_context)
+						self.call_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer, dm_tracer)
 					})
 					.expect("Sub-thread creation cannot fail; the host might run out of resources; qed")
 					.join()
@@ -1051,31 +1105,31 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 	}
 
 	/// Calls contract function with given contract params.
-	pub fn call<T, V>(
+	pub fn call<T, V, DM>(
 		&mut self,
 		params: ActionParams,
 		substate: &mut Substate,
 		tracer: &mut T,
 		vm_tracer: &mut V,
-		dm_context: &deepmind::Context,
-	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
-		self.call_with_stack_depth(params, substate, 0, tracer, vm_tracer, dm_context)
+		dm_tracer: &mut DM,
+	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer, DM: deepmind::Tracer {
+		self.call_with_stack_depth(params, substate, 0, tracer, vm_tracer, dm_tracer)
 	}
 
 	/// Creates contract with given contract params and stack depth.
 	/// NOTE. It does not finalize the transaction (doesn't do refunds, nor suicides).
 	/// Modifies the substate.
-	pub fn create_with_stack_depth<T, V>(
+	pub fn create_with_stack_depth<T, V, DM>(
 		&mut self,
 		params: ActionParams,
 		substate: &mut Substate,
 		stack_depth: usize,
 		tracer: &mut T,
 		vm_tracer: &mut V,
-		dm_context: &deepmind::Context,
-	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
-		if dm_context.is_enabled() {
-			dm_context.start_call(&params);
+		dm_tracer: &mut DM,
+	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer, DM: deepmind::Tracer {
+		if dm_tracer.is_enabled() {
+			dm_tracer.start_call(&params);
 		}
 
 		tracer.prepare_trace_create(&params);
@@ -1094,17 +1148,13 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 			self.depth,
 			stack_depth,
 			self.static_flag
-		).consume(self.state, substate, tracer, vm_tracer, dm_context);
+		).consume(self.state, substate, tracer, vm_tracer, dm_tracer);
 
-		if let Ok(ref val) = result {
-			if dm_context.is_enabled() {
-				if !val.apply_state {
-					dm_context.revert_call();
-				}
-
-				dm_context.end_call(&val.gas_left, &val.return_data);
-			}
-		};
+		if dm_tracer.is_enabled() {
+			if let Ok(ref val) = result {
+				dm_tracer.end_call(&val.gas_left, &val.return_data);
+			};
+		}
 
 		match result {
 			Ok(ref val) if val.apply_state => {
@@ -1118,10 +1168,11 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 				tracer.done_trace_failed(&vm::Error::Reverted);
 			},
 			Err(ref err) => {
-				if dm_context.is_enabled() {
-					dm_context.end_failed_call(&U256::from(0), err);
-				}
 				tracer.done_trace_failed(err);
+
+				if dm_tracer.is_enabled() {
+					dm_tracer.end_failed_call(err);
+				}
 			},
 		}
 		vm_tracer.done_subtrace();
@@ -1131,27 +1182,27 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 
 	/// Creates contract with given contract params, if the stack depth is above a threshold, create a new thread to
 	/// execute it.
-	pub fn create_with_crossbeam<T, V>(
+	pub fn create_with_crossbeam<T, V, DM>(
 		&mut self,
 		params: ActionParams,
 		substate: &mut Substate,
 		stack_depth: usize,
 		tracer: &mut T,
 		vm_tracer: &mut V,
-		dm_context: &deepmind::Context,
-	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
+		dm_tracer: &mut DM,
+	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer, DM: deepmind::Tracer {
 		let local_stack_size = ethcore_io::LOCAL_STACK_SIZE.with(|sz| sz.get());
 		let depth_threshold = local_stack_size.saturating_sub(STACK_SIZE_ENTRY_OVERHEAD) / STACK_SIZE_PER_DEPTH;
 
 		if stack_depth != depth_threshold {
-			self.create_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer, dm_context)
+			self.create_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer, dm_tracer)
 		} else {
 			thread::scope(|scope| {
 				let stack_size = cmp::max(self.schedule.max_depth.saturating_sub(depth_threshold) * STACK_SIZE_PER_DEPTH, local_stack_size);
 				scope.builder()
 					.stack_size(stack_size)
 					.spawn(|_| {
-						self.create_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer, dm_context)
+						self.create_with_stack_depth(params, substate, stack_depth, tracer, vm_tracer, dm_tracer)
 					})
 					.expect("Sub-thread creation cannot fail; the host might run out of resources; qed")
 					.join()
@@ -1162,19 +1213,19 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 	}
 
 	/// Creates contract with given contract params.
-	pub fn create<T, V>(
+	pub fn create<T, V, DM>(
 		&mut self,
 		params: ActionParams,
 		substate: &mut Substate,
 		tracer: &mut T,
 		vm_tracer: &mut V,
-		dm_context: &deepmind::Context,
-	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer {
-		self.create_with_stack_depth(params, substate, 0, tracer, vm_tracer, dm_context)
+		dm_tracer: &mut DM,
+	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer, DM: deepmind::Tracer {
+		self.create_with_stack_depth(params, substate, 0, tracer, vm_tracer, dm_tracer)
 	}
 
 	/// Finalizes the transaction (does refunds and suicides).
-	fn finalize<T, V>(
+	fn finalize<T, V, DM>(
 		&mut self,
 		t: &SignedTransaction,
 		mut substate: Substate,
@@ -1182,7 +1233,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		output: Bytes,
 		trace: Vec<T>,
 		vm_trace: Option<V>,
-		dm_context: &deepmind::Context,
+		dm_tracer: &mut DM,
 	) -> Result<Executed<T, V>, ExecutionError> {
 		let schedule = self.schedule;
 
@@ -2315,7 +2366,7 @@ mod tests {
 		let FinalizationResult { gas_left: result, return_data, .. } = {
 			let schedule = machine.schedule(info.number);
 			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
-			ex.call(params.clone(), &mut Substate::new(), &mut NoopTracer, &mut NoopVMTracer, deepmind::Context::noop()).unwrap()
+			ex.call(params.clone(), &mut Substate::new(), &mut NoopTracer, &mut NoopVMTracer, &mut deepmind::Context::noop().tracer()).unwrap()
 		};
 		(&mut output).copy_from_slice(&return_data[..(cmp::min(20, return_data.len()))]);
 
@@ -2329,8 +2380,8 @@ mod tests {
 		let mut output = [0u8; 20];
 		let FinalizationResult { gas_left: result, return_data, .. } = {
 			let schedule = machine.schedule(info.number);
-			let mut ex = Executive::new(&mut state, &info, &machine, &schedule, deepmind::Context::noop());
-			ex.call(params, &mut Substate::new(), &mut NoopTracer, &mut NoopVMTracer).unwrap()
+			let mut ex = Executive::new(&mut state, &info, &machine, &schedule);
+			ex.call(params, &mut Substate::new(), &mut NoopTracer, &mut NoopVMTracer, &mut deepmind::Context::noop().tracer()).unwrap()
 		};
 		(&mut output[..((cmp::min(20, return_data.len())))]).copy_from_slice(&return_data[..(cmp::min(20, return_data.len()))]);
 
