@@ -65,9 +65,12 @@ pub trait Tracer: Send {
     fn end_call(&mut self, _gas_left: &eth::U256, _return_data: &[u8]) {}
     fn end_failed_call(&mut self) {}
 
+    // Those are done integrating into OpenEthereum code, and they count matched Geth version (still missing 1 - 1 comparison)
     fn record_balance_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256, _reason: BalanceChangeReason) {}
     fn record_nonce_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256) {}
     fn record_keccak(&mut self, _hash_of_data: &eth::H256, _data: &[u8]) {}
+
+    // Those are NOT integrated yet into OpenEthereum, they should work once printed, needs to validate that count match with Geth prior moving it above
     fn record_call_without_code(&mut self) {}
     fn record_gas_refund(&mut self, _gas_old: u64, _gas_refund: u64) {}
     fn record_gas_consume(&mut self, _gas_old: u64, _gas_consumed: u64, _reason: GasChangeReason) {}

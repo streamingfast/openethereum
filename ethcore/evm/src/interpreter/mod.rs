@@ -736,6 +736,11 @@ impl<Cost: CostType> Interpreter<Cost> {
 				let offset = self.stack.pop_back();
 				let size = self.stack.pop_back();
 				let k = keccak(self.mem.read_slice(offset, size));
+
+				if dm_tracer.is_enabled() {
+					dm_tracer.record_keccak(&k, self.mem.read_slice(offset, size));
+				}
+
 				self.stack.push(k.into_uint());
 			},
 			instructions::SLOAD => {
