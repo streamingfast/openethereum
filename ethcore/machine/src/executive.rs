@@ -406,6 +406,10 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					Self::check_static_flag(params, self.static_flag, self.is_create)?;
 					Self::transfer_exec_balance(params, self.schedule, state, substate, dm_tracer)?;
 
+					if dm_tracer.is_enabled() {
+						dm_tracer.record_call_without_code();
+					}
+
 					Ok(FinalizationResult {
 						gas_left: params.gas,
 						return_data: ReturnData::empty(),
@@ -488,6 +492,11 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 						Self::check_static_flag(&params, static_flag, is_create)?;
 						state.checkpoint();
 						Self::transfer_exec_balance(&params, schedule, state, substate, dm_tracer)?;
+
+						if dm_tracer.is_enabled() && !params.has_code_for_deepmind() {
+							dm_tracer.record_call_without_code();
+						}
+
 						Ok(())
 					};
 

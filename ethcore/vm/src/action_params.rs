@@ -145,6 +145,16 @@ impl From<ethjson::vm::Transaction> for ActionParams {
 }
 
 impl ActionParams {
+	pub fn has_code_for_deepmind(&self) -> bool {
+		// It appears that even for Genesis accounts, the code of the account is set
+		// to 0 bytes when the genesis definition didn't had any code set. So just checking
+		// the code option is not enough, the bytes lenght must be checked at the same time.
+		match self.code {
+			Some(ref bytes) if bytes.len() > 0 => true,
+			_ => false
+		}
+	}
+
 	pub fn to_deepmind_call(&self) -> deepmind::Call {
 		deepmind::Call {
 			call_type: self.action_type.to_deepmind_call_type(),

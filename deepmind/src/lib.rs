@@ -83,6 +83,8 @@ pub trait Tracer: Send {
 
     // fn record_log(&mut self, log: *types.Log) {}
     // fn record_trx_pool(&mut self, event_type: string, tx *types.Transaction, err error) {}
+
+    fn debug(&mut self, _input: String) {}
 }
 
 pub struct NoopTracer;
@@ -210,7 +212,7 @@ impl Tracer for TransactionTracer {
     }
 
     fn record_keccak(&mut self, hash_of_data: &eth::H256, data: &[u8]) {
-        self.printer.print(format!("EVM_KECCAK, {call_index} {hash_of_data:x} {data:x}",
+        self.printer.print(format!("EVM_KECCAK {call_index} {hash_of_data:x} {data:x}",
             call_index = self.active_call_index(),
             hash_of_data = H256(hash_of_data),
             data = Hex(data),
@@ -218,7 +220,7 @@ impl Tracer for TransactionTracer {
     }
 
     fn record_call_without_code(&mut self) {
-        self.printer.print(format!("ACCOUNT_WITHOUT_CODE, {call_index}",
+        self.printer.print(format!("ACCOUNT_WITHOUT_CODE {call_index}",
             call_index = self.active_call_index(),
         ).as_ref());
     }
@@ -236,7 +238,7 @@ impl Tracer for TransactionTracer {
     }
 
     fn record_storage_change(&mut self, address: &eth::Address, key: &eth::H256, old_data: &eth::H256, new_data: &eth::H256) {
-        self.printer.print(format!("STORAGE_CHANGE, {call_index} {address:x} {key:x} {old_data:x} {new_data:x}",
+        self.printer.print(format!("STORAGE_CHANGE {call_index} {address:x} {key:x} {old_data:x} {new_data:x}",
             call_index = self.active_call_index(),
             address = Address(address),
             key = H256(key),
@@ -246,7 +248,7 @@ impl Tracer for TransactionTracer {
     }
 
     fn record_suicide(&mut self, address: &eth::Address, suicided: bool, balance_before_suicide: &eth::U256) {
-        self.printer.print(format!("SUICIDE_CHANGE, {call_index} {address:x} {suicided} {balance_before_suicide:x}",
+        self.printer.print(format!("SUICIDE_CHANGE {call_index} {address:x} {suicided} {balance_before_suicide:x}",
             call_index = self.active_call_index(),
             address = Address(address),
             suicided = suicided,
@@ -263,14 +265,14 @@ impl Tracer for TransactionTracer {
     }
 
     fn record_new_account(&mut self, address: &eth::Address) {
-        self.printer.print(format!("CREATED_ACCOUNT, {call_index} {address:x}",
+        self.printer.print(format!("CREATED_ACCOUNT {call_index} {address:x}",
             call_index = self.active_call_index(),
             address = Address(address),
         ).as_ref());
     }
 
     fn record_code_change(&mut self, address: &eth::Address, input_hash: &eth::H256, code_hash: &eth::H256, old_code: &[u8], new_code: &[u8]) {
-        self.printer.print(format!("CODE_CHANGE, {call_index} {address:x} {input_hash:x} {old_code:x} {code_hash:x} {new_code:x}",
+        self.printer.print(format!("CODE_CHANGE {call_index} {address:x} {input_hash:x} {old_code:x} {code_hash:x} {new_code:x}",
             // Follows Geth order, yes it's not aligned with the record_code_change signature, but we must respect console reader order here
             call_index = self.active_call_index(),
             address = Address(address),
@@ -287,7 +289,7 @@ impl Tracer for TransactionTracer {
         let call_index = self.active_call_index();
 
         // Matt: Validate against Geth logic, see commented code at top of this implementation
-        self.printer.print(format!("GAS_EVENT, {call_index} {for_call_index} {reason} {gas_value}",
+        self.printer.print(format!("GAS_EVENT {call_index} {for_call_index} {reason} {gas_value}",
             call_index = call_index,
             for_call_index = call_index + 1,
             reason = "before_call",
@@ -301,12 +303,16 @@ impl Tracer for TransactionTracer {
         let call_index = self.active_call_index();
 
         // Matt: Validate against Geth logic, see commented code at top of this implementation
-        self.printer.print(format!("GAS_EVENT, {call_index} {for_call_index} {reason} {gas_value}",
+        self.printer.print(format!("GAS_EVENT {call_index} {for_call_index} {reason} {gas_value}",
             call_index = call_index,
             for_call_index = call_index,
             reason = "before_call",
             gas_value = gas_value,
         ).as_ref());
+    }
+
+    fn debug(&mut self, input: String) {
+        self.printer.print(&input);
     }
 }
 
