@@ -36,13 +36,13 @@ pub struct FinalizationResult {
 ///
 /// In practice, this is just used to define an inherent impl on
 /// `Reult<GasLeft<'a>>`.
-pub trait Finalize {
+pub trait Finalize<DM> where DM: deepmind::Tracer {
 	/// Consume the externalities, call return if necessary, and produce call result.
-	fn finalize<E: Ext>(self, ext: E) -> Result<FinalizationResult>;
+	fn finalize<E: Ext<DM>>(self, ext: E) -> Result<FinalizationResult>;
 }
 
-impl Finalize for Result<GasLeft> {
-	fn finalize<E: Ext>(self, ext: E) -> Result<FinalizationResult> {
+impl<DM> Finalize<DM> for Result<GasLeft> where DM: deepmind::Tracer {
+	fn finalize<E: Ext<DM>>(self, ext: E) -> Result<FinalizationResult> {
 		match self {
 			Ok(GasLeft::Known(gas_left)) => {
 				Ok(FinalizationResult {
@@ -61,8 +61,8 @@ impl Finalize for Result<GasLeft> {
 	}
 }
 
-impl Finalize for Error {
-	fn finalize<E: Ext>(self, _ext: E) -> Result<FinalizationResult> {
+impl<DM> Finalize<DM> for Error where DM: deepmind::Tracer {
+	fn finalize<E: Ext<DM>>(self, _ext: E) -> Result<FinalizationResult> {
 		Err(self)
 	}
 }

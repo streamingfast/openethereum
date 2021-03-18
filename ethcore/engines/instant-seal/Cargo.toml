@@ -9,6 +9,7 @@ license = "GPL-3.0"
 [dependencies]
 client-traits = { path = "../../client-traits" }
 common-types = { path = "../../types" }
+deepmind = { path = "../../../deepmind" }
 engine = { path = "../../engine" }
 ethjson = { path = "../../../json" }
 ethereum-types = "0.9.0"

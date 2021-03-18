@@ -251,7 +251,7 @@ impl Engine for Ethash {
 
 	/// Apply the block reward on finalisation of the block.
 	/// This assumes that all uncles are valid uncles (i.e. of at least one generation before the current).
-	fn on_close_block(&self, block: &mut ExecutedBlock, _parent_header: &Header) -> Result<(), Error> {
+	fn on_close_block(&self, block: &mut ExecutedBlock, _parent_header: &Header, dm_context: &deepmind::Context) -> Result<(), Error> {
 		use std::ops::Shr;
 
 		let author = *block.header.author();
@@ -309,7 +309,7 @@ impl Engine for Ethash {
 			},
 		};
 
-		block_reward::apply_block_rewards(&rewards, block, &self.machine)
+		block_reward::apply_block_rewards(&rewards, block, &self.machine, dm_context)
 	}
 
 	#[cfg(not(feature = "miner-debug"))]

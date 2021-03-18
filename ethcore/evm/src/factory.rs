@@ -31,7 +31,7 @@ pub struct Factory {
 impl Factory {
 	/// Create fresh instance of VM
 	/// Might choose implementation depending on supplied gas.
-	pub fn create(&self, params: ActionParams, schedule: &Schedule, depth: usize) -> Box<dyn Exec> {
+	pub fn create<DM>(&self, params: ActionParams, schedule: &Schedule, depth: usize) -> Box<dyn Exec<DM>> where DM: deepmind::Tracer {
 		if Self::can_fit_in_usize(&params.gas) {
 			Box::new(super::interpreter::Interpreter::<usize>::new(params, self.evm_cache.clone(), schedule, depth))
 		} else {

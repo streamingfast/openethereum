@@ -5,6 +5,7 @@ version = "0.1.0"
 authors = ["Parity Technologies <admin@parity.io>"]
 
 [dependencies]
+deepmind = { path = "../../deepmind" }
 derive_more = "0.99"
 ethbloom = "0.9.0"
 ethcore-io = { path = "../../util/io" }

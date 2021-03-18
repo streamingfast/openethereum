@@ -96,7 +96,7 @@ enum ExecutionOutcome {
 }
 
 impl WasmInterpreter {
-	pub fn run(self: Box<WasmInterpreter>, ext: &mut dyn vm::Ext) -> vm::Result<GasLeft> {
+	pub fn run<DM>(self: Box<WasmInterpreter>, ext: &mut dyn vm::Ext<DM>, dm_tracer: &mut DM) -> vm::Result<GasLeft> where DM: deepmind::Tracer {
 		let (module, data) = parser::payload(&self.params, ext.schedule().wasm())?;
 
 		let loaded_module = wasmi::Module::from_parity_wasm_module(module).map_err(Error::Interpreter)?;
@@ -134,6 +134,7 @@ impl WasmInterpreter {
 					code_version: self.params.code_version,
 					value: self.params.value.value(),
 				},
+				dm_tracer
 			);
 
 			// cannot overflow if static_region < 2^16,
@@ -195,8 +196,8 @@ impl WasmInterpreter {
 	}
 }
 
-impl vm::Exec for WasmInterpreter {
-	fn exec(self: Box<WasmInterpreter>, ext: &mut dyn vm::Ext) -> vm::ExecTrapResult<GasLeft> {
-		Ok(self.run(ext))
+impl<DM> vm::Exec<DM> for WasmInterpreter where DM: deepmind::Tracer {
+	fn exec(self: Box<WasmInterpreter>, ext: &mut dyn vm::Ext<DM>, dm_tracer: &mut DM) -> vm::ExecTrapResult<GasLeft, DM> {
+		Ok(self.run(ext, dm_tracer))
 	}
 }

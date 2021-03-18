@@ -59,6 +59,14 @@ impl ActionValue {
 	pub fn apparent<T: Into<U256>>(apparent_value: T) -> ActionValue {
 		ActionValue::Apparent(apparent_value.into())
 	}
+
+	/// Returns the transfer action value or None if only an apparent value
+	pub fn to_deepmind_value(&self) -> Option<U256> {
+		match *self {
+			ActionValue::Transfer(amount) => Some(amount),
+			_ => None,
+		}
+	}
 }
 
 // TODO: should be a trait, possible to avoid cloning everything from a Transaction(/View).
@@ -132,6 +140,19 @@ impl From<ethjson::vm::Transaction> for ActionParams {
 			value: ActionValue::Transfer(t.value.into()),
 			action_type: ActionType::Call,
 			params_type: ParamsType::Separate,
+		}
+	}
+}
+
+impl ActionParams {
+	pub fn to_deepmind_call(&self) -> deepmind::Call {
+		deepmind::Call {
+			call_type: self.action_type.to_deepmind_call_type(),
+			from: self.sender,
+			to: self.code_address,
+			gas_limit: self.gas.as_u64(),
+			value: self.value.to_deepmind_value(),
+			input: self.data.as_ref().map(|value| value as &[u8]),
 		}
 	}
 }

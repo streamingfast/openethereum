@@ -9,6 +9,7 @@ license = "GPL-3.0"
 [dependencies]
 block-reward = { path = "../../block-reward" }
 common-types = { path = "../../types" }
+deepmind = { path = "../../../deepmind" }
 engine = { path = "../../engine" }
 ethash= { path = "../../../ethash" }
 ethereum-types = "0.9.0"

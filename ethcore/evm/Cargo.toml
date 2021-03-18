@@ -6,6 +6,7 @@ authors = ["Parity Technologies <admin@parity.io>"]
 
 [dependencies]
 bit-set = "0.4"
+deepmind = { path = "../../deepmind" }
 parity-bytes = "0.1"
 ethereum-types = "0.9.0"
 parity-util-mem = "0.6.0"

@@ -63,6 +63,19 @@ impl Decodable for ActionType {
 	}
 }
 
+impl ActionType {
+	pub fn to_deepmind_call_type(&self) -> deepmind::CallType {
+		match *self {
+			ActionType::Create => deepmind::CallType::Create,
+			ActionType::Call => deepmind::CallType::Call,
+			ActionType::CallCode => deepmind::CallType::CallCode,
+			ActionType::DelegateCall => deepmind::CallType::DelegateCall,
+			ActionType::StaticCall => deepmind::CallType::StaticCall,
+			ActionType::Create2 => deepmind::CallType::Create2,
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use rlp::*;

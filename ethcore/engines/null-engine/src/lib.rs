@@ -76,7 +76,8 @@ impl Engine for NullEngine {
 	fn on_close_block(
 		&self,
 		block: &mut ExecutedBlock,
-		_parent_header: &Header
+		_parent_header: &Header,
+		dm_context: &deepmind::Context,
 	) -> Result<(), Error> {
 		use std::ops::Shr;
 
@@ -101,7 +102,7 @@ impl Engine for NullEngine {
 			rewards.push((*uncle_author, RewardKind::uncle(number, u.number()), result_uncle_reward));
 		}
 
-		block_reward::apply_block_rewards(&rewards, block, &self.machine)
+		block_reward::apply_block_rewards(&rewards, block, &self.machine, dm_context)
 	}
 
 	fn verify_local_seal(&self, _header: &Header) -> Result<(), Error> {

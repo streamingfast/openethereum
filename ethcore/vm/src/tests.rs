@@ -113,7 +113,7 @@ impl FakeExt {
 		ext.schedule = Schedule::new_berlin();
 		ext
 	}
-	
+
 	/// Alter fake externalities to allow wasm
 	pub fn with_wasm(mut self) -> Self {
 		self.schedule.wasm = Some(Default::default());
@@ -127,7 +127,7 @@ impl FakeExt {
 	}
 }
 
-impl Ext for FakeExt {
+impl Ext<deepmind::NoopTracer> for FakeExt {
 	fn initial_storage_at(&self, _key: &H256) -> Result<H256> {
 		Ok(H256::zero())
 	}
@@ -157,7 +157,7 @@ impl Ext for FakeExt {
 		Ok(self.balances[address])
 	}
 
-	fn blockhash(&mut self, number: &U256) -> H256 {
+	fn blockhash(&mut self, number: &U256, _dm_tracer: &mut deepmind::NoopTracer) -> H256 {
 		self.blockhashes.get(number).unwrap_or(&H256::zero()).clone()
 	}
 
@@ -169,6 +169,7 @@ impl Ext for FakeExt {
 		_parent_version: &U256,
 		address: CreateContractAddress,
 		_trap: bool,
+		_dm_tracer: &mut deepmind::NoopTracer,
 	) -> ::std::result::Result<ContractCreateResult, TrapKind> {
 		self.calls.insert(FakeCall {
 			call_type: FakeCallType::Create,
@@ -194,6 +195,7 @@ impl Ext for FakeExt {
 		code_address: &Address,
 		_call_type: ActionType,
 		_trap: bool,
+		_dm_tracer: &mut deepmind::NoopTracer,
 	) -> ::std::result::Result<MessageCallResult, TrapKind> {
 		self.calls.insert(FakeCall {
 			call_type: FakeCallType::Call,
@@ -233,7 +235,7 @@ impl Ext for FakeExt {
 		unimplemented!();
 	}
 
-	fn suicide(&mut self, refund_address: &Address) -> Result<()> {
+	fn suicide(&mut self, refund_address: &Address, _dm_tracer: &mut deepmind::NoopTracer) -> Result<()> {
 		self.suicides.insert(refund_address.clone());
 		Ok(())
 	}

@@ -8,6 +8,7 @@ license = "GPL-3.0"
 
 [dependencies]
 common-types = { path = "../types" }
+deepmind = { path = "../../deepmind" }
 engine = { path = "../engine" }
 ethabi = "12.0"
 ethabi-derive = "12.0"

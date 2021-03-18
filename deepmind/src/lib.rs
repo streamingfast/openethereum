@@ -1,26 +1,6 @@
-extern crate common_types as types;
-extern crate ethereum_types;
-extern crate rustc_hex;
+use std::{fmt, sync::Arc};
+use rustc_hex::ToHex;
 
-use std::{borrow::Borrow, fmt::{self, LowerHex}, sync::{Arc, atomic::{AtomicBool, Ordering}}};
-use rustc_hex::{ToHex};
-use types::{BlockNumber, header::Header, transaction::{Action, SignedTransaction, UnverifiedTransaction}};
-use vm::{ActionParams, ActionType, ActionValue, ReturnData};
-
-// This set of variables/functions are unused for now, will see how far we need them or not
-static ENABLED: AtomicBool = AtomicBool::new(true);
-
-pub fn enable() {
-    ENABLED.store(true, Ordering::Relaxed)
-}
-
-pub fn disable() {
-    ENABLED.store(false, Ordering::Relaxed)
-}
-
-pub fn is_enabled() -> bool {
-    return ENABLED.load(Ordering::Relaxed);
-}
 #[derive(Debug, PartialEq, Clone)]
 pub struct Config {
     pub enabled: bool,
@@ -45,15 +25,15 @@ impl Default for Config {
 }
 
 pub trait Printer: Send + Sync {
-    fn print(&self, input: &str);
+    fn print(&self, _input: &str) {}
 }
 
 pub struct DiscardPrinter {
 }
 
 impl Printer for DiscardPrinter {
-    fn print(&self, _input: &str) {}
 }
+
 pub struct IoPrinter {
     // io: Box<dyn Write + Send + Sync>
 }
@@ -75,14 +55,20 @@ impl Printer for IoPrinter {
     }
 }
 
-
 pub trait Tracer: Send {
     fn is_enabled(&self) -> bool { false }
-    fn start_call(&mut self, _params: &ActionParams) {}
+    fn start_call(&mut self, _call: Call) {}
     fn reverted_call(&self, _gas_left: &ethereum_types::U256) {}
-    fn failed_call(&mut self, _gas_left: &ethereum_types::U256, _gas_left_after_failure: &ethereum_types::U256, _err: &vm::Error) {}
-    fn end_call(&mut self, _gas_left: &ethereum_types::U256, _return_data: &vm::ReturnData) {}
-    fn end_failed_call(&mut self, _err: &vm::Error) {}
+    fn failed_call(&mut self, _gas_left: &ethereum_types::U256, _gas_left_after_failure: &ethereum_types::U256, _err: &String) {}
+    fn end_call(&mut self, _gas_left: &ethereum_types::U256, _return_data: &[u8]) {}
+    fn end_failed_call(&mut self) {}
+
+    fn record_balance_change(&mut self,
+        _address: &ethereum_types::Address,
+        _old: &ethereum_types::U256,
+        _new: &ethereum_types::U256,
+        _reason: BalanceChangeReason,
+    ) {}
 }
 
 pub struct NoopTracer;
@@ -90,13 +76,34 @@ pub struct NoopTracer;
 impl Tracer for NoopTracer {
 }
 
-/// Tracer is responsible of transaction tracing level with mutability like the ability to track the
+/// BlockTracer is responsible of recording single tracing elements (like Balance or Gas change)
+/// that happens outside of any transactions on a block. 
+pub struct BlockTracer {
+    printer: Arc<Box<dyn Printer>>,
+}
+
+impl Tracer for BlockTracer {
+    fn is_enabled(&self) -> bool {
+        return true;
+    }
+
+    fn record_balance_change(&mut self,
+        address: &ethereum_types::Address,
+        old: &ethereum_types::U256,
+        new: &ethereum_types::U256,
+        reason: BalanceChangeReason,
+    ) {
+        record_balance_change(&self.printer, 0, address, old, new, reason)
+    }
+}
+
+/// TransactionTracer is responsible of transaction tracing level with mutability like the ability to track the
 /// actual call index we are currently at. Aside mutability and state, it delegates all Deep Mind
 /// printing operations to the `Context`.
 pub struct TransactionTracer {
     printer: Arc<Box<dyn Printer>>,
-    call_index: u32,
-    call_stack: Vec<u32>,
+    call_index: u64,
+    call_stack: Vec<u64>,
     gas_left_after_latest_failure: Option<ethereum_types::U256>,
 }
 
@@ -105,32 +112,32 @@ impl Tracer for TransactionTracer {
         return true;
     }
 
-    fn start_call(&mut self, params: &ActionParams) {
+    fn start_call(&mut self, call: Call) {
         self.call_index += 1;
         self.call_stack.push(self.call_index);
 
         self.printer.print(format!("EVM_RUN_CALL {call_type} {call_index}",
-            call_type = CallType(&params.action_type),
+            call_type = call.call_type,
             call_index = self.call_index,
         ).as_ref());
 
         let mut value = ".".to_owned();
-        if let ActionValue::Transfer(ref amount) = params.value {
+        if let Some(ref amount) = call.value {
             value = format!("{:x}", U256(amount));
         }
 
         let mut input = ".".to_owned();
-        if let Some(ref bytes) = params.data {
+        if let Some(bytes) = call.input {
             input = format!("{:x}", Hex(bytes));
         }
 
         self.printer.print(format!("EVM_PARAM {call_type} {call_index} {from:x} {to:x} {value} {gas_limit} {input}",
-            call_type = CallType(&params.action_type),
+            call_type = call.call_type,
             call_index = self.call_index,
-            from = Address(&params.sender),
-            to = Address(&params.code_address),
+            from = Address(&call.from),
+            to = Address(&call.to),
             value = value,
-            gas_limit = params.gas.as_u64(),
+            gas_limit = call.gas_limit,
             input = input,
         ).as_ref());
     }
@@ -139,7 +146,7 @@ impl Tracer for TransactionTracer {
         self.printer.print(format!("EVM_CALL_FAILED {call_index} {gas_left} {reason}",
             call_index = self.active_call_index(),
             gas_left = gas_left.as_u64(),
-            reason = vm::Error::Reverted,
+            reason = "Reverted",
         ).as_ref());
 
         self.printer.print(format!("EVM_REVERTED {call_index}",
@@ -147,7 +154,7 @@ impl Tracer for TransactionTracer {
         ).as_ref());
     }
 
-    fn failed_call(&mut self, gas_left: &ethereum_types::U256, gas_left_after_failure: &ethereum_types::U256, err: &vm::Error) {
+    fn failed_call(&mut self, gas_left: &ethereum_types::U256, gas_left_after_failure: &ethereum_types::U256, err: &String) {
         if self.gas_left_after_latest_failure.is_some() {
             panic!("There is already a gas_left_after_latest_failure value set at this point that should have been consumed already")
         }
@@ -161,7 +168,7 @@ impl Tracer for TransactionTracer {
         self.gas_left_after_latest_failure = Some(*gas_left_after_failure);
     }
 
-    fn end_call(&mut self, gas_left: &ethereum_types::U256, return_data: &vm::ReturnData) {
+    fn end_call(&mut self, gas_left: &ethereum_types::U256, return_data: &[u8]) {
        let call_index = match self.call_stack.pop() {
            Some(index) => index,
            None => panic!("There should always be a call in our call index stack")
@@ -180,7 +187,7 @@ impl Tracer for TransactionTracer {
         ).as_ref());
     }
 
-    fn end_failed_call(&mut self, err: &vm::Error) {
+    fn end_failed_call(&mut self) {
         let gas_left = match self.gas_left_after_latest_failure {
             Some(amount) => amount,
             None => panic!("There should be a gas_left_after_latest_failure value set at this point")
@@ -188,19 +195,99 @@ impl Tracer for TransactionTracer {
 
         self.gas_left_after_latest_failure = None;
 
-        self.end_call(&gas_left, &ReturnData::empty())
+        self.end_call(&gas_left, &[])
+    }
+
+    fn record_balance_change(&mut self,
+        address: &ethereum_types::Address,
+        old: &ethereum_types::U256,
+        new: &ethereum_types::U256,
+        reason: BalanceChangeReason,
+    ) {
+        record_balance_change(&self.printer, self.active_call_index() as u64, address, old, new, reason)
     }
 }
 
 impl TransactionTracer {
-    fn active_call_index(&self) -> u32 {
+    fn active_call_index(&self) -> u64 {
         if self.call_stack.len() <= 0 {
-            panic!("There should be an active call in the call index stack")
+            // There is some balance change(s) in a transaction that happens before any call has been scheduled yet,
+            // this is the case for the initial gas buying for example. If the call stack is empty, let's return
+            // active call index 0 and the console reader process deals with it and attach it to the root call of
+            // the transaction.
+            return 0
         }
 
         self.call_stack[self.call_stack.len() - 1]
     }
 }
+
+#[inline]
+fn record_balance_change(
+    printer: &Box<dyn Printer>,
+    call_index: u64,
+    address: &ethereum_types::Address,
+    old: &ethereum_types::U256,
+    new: &ethereum_types::U256,
+    reason: BalanceChangeReason,
+) {
+    if reason != BalanceChangeReason::Ignored {
+        printer.print(format!("BALANCE_CHANGE {call_index} {address:x} {old_balance:x} {new_balance:x} {reason}",
+            call_index = call_index,
+            address = Address(address),
+            old_balance = U256(old),
+            new_balance = U256(new),
+            reason = reason,
+        ).as_ref())
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum BalanceChangeReason {
+    Unknown,
+    RewardMineUncle,
+    RewardMineBlock,
+    DaoRefundContract,
+    DaoAdjustBalance,
+    Transfer,
+    GenesisBalance,
+    GasBuy,
+    RewardTransactionFee,
+    GasRefund,
+    TouchAccount,
+    SuicideRefund,
+    SuicideWithdraw,
+    CallBalanceOverride,
+
+    // Special enum that should be ignored when writing, should never be displayed
+    Ignored,
+}
+
+impl fmt::Display for BalanceChangeReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The output must match exact names found in `proto-ethereum/dfuse/ethereum/codec/v1/codec.proto#BalanceChange.Reason` enum, which is also respected by Geth
+        f.write_str(match self {
+            BalanceChangeReason::Unknown => "unknown",
+            BalanceChangeReason::RewardMineUncle => "reward_mine_uncle",
+            BalanceChangeReason::RewardMineBlock => "reward_mine_block",
+            BalanceChangeReason::DaoRefundContract => "dao_refund_contract",
+            BalanceChangeReason::DaoAdjustBalance => "dao_adjust_balance",
+            BalanceChangeReason::Transfer => "transfer",
+            BalanceChangeReason::GenesisBalance => "genesis_balance",
+            BalanceChangeReason::GasBuy => "gas_buy",
+            BalanceChangeReason::RewardTransactionFee => "reward_transaction_fee",
+            BalanceChangeReason::GasRefund => "gas_refund",
+            BalanceChangeReason::TouchAccount => "touch_account",
+            BalanceChangeReason::SuicideRefund => "suicide_refund",
+            BalanceChangeReason::SuicideWithdraw => "suicide_withdraw",
+
+            // Those that should actually results in panics
+            BalanceChangeReason::CallBalanceOverride => panic!("A CallBalanceOverride balance change reason should never be used"),
+            BalanceChangeReason::Ignored => panic!("A Ignored balance change reason should never be displayed")
+        })
+    }
+}
+
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Instrumentation {
@@ -230,6 +317,10 @@ impl Context {
         }
     }
 
+    pub fn block_tracer(&self) -> BlockTracer {
+        BlockTracer{printer: self.printer.clone()}
+    }
+
     pub fn tracer(&self) -> TransactionTracer {
         TransactionTracer{printer: self.printer.clone(), call_index: 0, call_stack: Vec::with_capacity(16), gas_left_after_latest_failure: None}
     }
@@ -242,43 +333,42 @@ impl Context {
         return self.instrumentation == Instrumentation::Full || self.instrumentation == Instrumentation::BlockProgress;
     }
 
-    pub fn start_block(&self, num: BlockNumber) {
+    pub fn start_block(&self, num: u64) {
         self.printer.print(format!("BEGIN_BLOCK {num}", num = num).as_ref())
     }
 
-    pub fn finalize_block(&self, num: BlockNumber) {
+    pub fn finalize_block(&self, num: u64) {
         self.printer.print(format!("FINALIZE_BLOCK {num}", num = num).as_ref())
     }
 
-    pub fn end_block(&self, size: u64, header: &Header, _uncles: &Vec<Header>) {
+    pub fn end_block(&self, num: u64, size: u64, /*, header, uncle_headers */) {
         self.printer.print(format!("END_BLOCK {num} {size}",
-            num = header.number(),
+            num = num,
             size = size,
         ).as_ref())
     }
 
-    pub fn start_transaction(&self, t: &SignedTransaction) {
-        let (v, r, s) = t.signature_for_deepmind();
-        let trx = t.as_unsigned();
-        let mut to = ".".to_owned();
-        if let Action::Call(ref address) = trx.action {
-            to = format!("{:x}", Address(&address));
+    pub fn start_transaction(&self, trx: Transaction) {
+        let (v, r, s) = trx.signature;
+        let mut to_str = ".".to_owned();
+        if let Some(ref address) = trx.to {
+            to_str = format!("{:x}", Address(address));
         }
 
         self.printer.print(format!("BEGIN_APPLY_TRX {hash:x} {to} {value:x} {v:x} {r:x} {s:x} {gas_limit} {gas_price:x} {nonce} {data:x}",
-            hash = H256(&t.hash()),
-            to = to,
+            hash = H256(&trx.hash),
+            to = to_str,
             value = U256(&trx.value),
             v = v,
             r = H256(&r),
             s = H256(&s),
-            gas_limit = trx.gas.as_u64(),
+            gas_limit = &trx.gas_limit,
             gas_price = U256(&trx.gas_price),
-            nonce = trx.nonce,
+            nonce = &trx.nonce,
             data = Hex(&trx.data),
         ).as_ref());
 
-        self.printer.print(format!("TRX_FROM {from:x}", from = Address(&t.sender())).as_ref());
+        self.printer.print(format!("TRX_FROM {from:x}", from = Address(&trx.from)).as_ref());
     }
 
     pub fn end_transaction(&self) {
@@ -298,21 +388,47 @@ impl fmt::LowerHex for Address<'_> {
     }
 }
 
-struct CallType<'a>(&'a ActionType);
+pub enum CallType {
+    Call,
+    CallCode,
+    Create,
+    Create2,
+    DelegateCall,
+    StaticCall,
+}
 
-impl fmt::Display for CallType<'_> {
+impl fmt::Display for CallType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-       let type_name = match self.0 {
-           ActionType::Call => "CALL",
-           ActionType::CallCode => "CALLCODE",
-           ActionType::Create => "CREATE",
-           ActionType::Create2 => "CREATE",
-           ActionType::DelegateCall => "DELEGATE",
-           ActionType::StaticCall => "STATIC",
-       };
-
-       return f.write_str(type_name)
+       return f.write_str(match self {
+            CallType::Call => "CALL",
+            CallType::CallCode => "CALLCODE",
+            CallType::Create => "CREATE",
+            CallType::Create2 => "CREATE",
+            CallType::DelegateCall => "DELEGATE",
+            CallType::StaticCall => "STATIC",
+        })
     }
+}
+
+pub struct Call<'a> {
+    pub call_type: CallType,
+    pub from: ethereum_types::Address,
+    pub to: ethereum_types::Address,
+    pub value: Option<ethereum_types::U256>,
+    pub gas_limit: u64,
+    pub input: Option<&'a [u8]>,
+}
+
+pub struct Transaction<'a> {
+    pub hash: ethereum_types::H256,
+    pub from: ethereum_types::Address,
+    pub to: Option<ethereum_types::Address>,
+    pub value: ethereum_types::U256,
+    pub gas_limit: u64,
+    pub gas_price: ethereum_types::U256,
+    pub nonce: u64,
+    pub data: &'a [u8],
+    pub signature: (u64, ethereum_types::H256, ethereum_types::H256),
 }
 
 struct Hex<'a>(&'a [u8]);

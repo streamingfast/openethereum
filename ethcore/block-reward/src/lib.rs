@@ -141,9 +141,27 @@ pub fn apply_block_rewards(
 	rewards: &[(Address, RewardKind, U256)],
 	block: &mut ExecutedBlock,
 	machine: &Machine,
+	dm_context: &deepmind::Context,
 ) -> Result<(), Error> {
-	for &(ref author, _, ref block_reward) in rewards {
-		machine.add_balance(block, author, block_reward)?;
+	if dm_context.is_enabled() {
+		let mut dm_tracer = dm_context.block_tracer();
+
+		for &(ref author, ref kind, ref block_reward) in rewards {
+			let dm_reason = match kind {
+				RewardKind::Author => deepmind::BalanceChangeReason::RewardMineBlock,
+				RewardKind::EmptyStep => deepmind::BalanceChangeReason::RewardMineBlock,
+				RewardKind::External => deepmind::BalanceChangeReason::RewardMineBlock,
+				RewardKind::Uncle(..) => deepmind::BalanceChangeReason::RewardMineUncle,
+			};
+
+			machine.add_balance(block, author, block_reward, dm_reason, &mut dm_tracer)?;
+		}
+	} else {
+		// Deep Mind: I was not able to use a dynamic Trait object to avoi duplicating the code below. The for-loop
+		//            below and above must be kept in sync the only difference being the Ignored and NoopTracer.
+		for &(ref author, _, ref block_reward) in rewards {
+			machine.add_balance(block, author, block_reward, deepmind::BalanceChangeReason::Ignored, &mut deepmind::NoopTracer)?;
+		}
 	}
 
 	if let Tracing::Enabled(ref mut traces) = *block.traces_mut() {

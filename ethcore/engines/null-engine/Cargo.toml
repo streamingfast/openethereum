@@ -8,6 +8,7 @@ license = "GPL-3.0"
 
 [dependencies]
 common-types = { path = "../../types" }
+deepmind = { path = "../../../deepmind" }
 block-reward = { path = "../../block-reward" }
 engine = { path = "../../engine" }
 ethjson = { path = "../../../json" }

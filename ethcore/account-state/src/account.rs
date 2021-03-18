@@ -493,15 +493,34 @@ impl Account {
 	}
 
 	/// Increase account balance.
-	pub fn add_balance(&mut self, x: &U256) {
+	pub fn add_balance<DM>(&mut self, x: &U256, reason: deepmind::BalanceChangeReason, address: &Address, dm_tracer: &mut DM) where DM: deepmind::Tracer {
+		let mut old_balance: Option<U256> = None;
+		if dm_tracer.is_enabled() {
+			old_balance = Some(self.balance);
+		}
+
 		self.balance = self.balance.saturating_add(*x);
+
+		if dm_tracer.is_enabled() {
+			dm_tracer.record_balance_change(address, &old_balance.unwrap(), &self.balance, reason);
+		}
 	}
 
 	/// Decrease account balance.
 	/// Panics if balance is less than `x`
-	pub fn sub_balance(&mut self, x: &U256) {
+	pub fn sub_balance<DM>(&mut self, x: &U256, reason: deepmind::BalanceChangeReason, address: &Address, dm_tracer: &mut DM) where DM: deepmind::Tracer {
 		assert!(self.balance >= *x);
+
+		let mut old_balance: Option<U256> = None;
+		if dm_tracer.is_enabled() {
+			old_balance = Some(self.balance);
+		}
+
 		self.balance = self.balance - *x;
+
+		if dm_tracer.is_enabled() {
+			dm_tracer.record_balance_change(address, &old_balance.unwrap(), &self.balance, reason);
+		}
 	}
 
 	/// Commit the `storage_changes` to the backing DB and update `storage_root`.

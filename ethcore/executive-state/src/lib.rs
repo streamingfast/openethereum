@@ -1199,11 +1199,13 @@ mod tests {
 
 	#[test]
 	fn empty_account_is_not_created() {
+		let dm_ignored = deepmind::BalanceChangeReason::Ignored;
+
 		let a = Address::zero();
 		let db = get_temp_state_db();
 		let (root, db) = {
 			let mut state = State::new(db, U256::from(0), Default::default());
-			state.add_balance(&a, &U256::default(), CleanupMode::NoEmpty).unwrap(); // create an empty account
+			state.add_balance(&a, &U256::default(), CleanupMode::NoEmpty, dm_ignored, deepmind::NoopTracer).unwrap(); // create an empty account
 			state.commit().unwrap();
 			state.drop()
 		};
@@ -1214,11 +1216,13 @@ mod tests {
 
 	#[test]
 	fn empty_account_exists_when_creation_forced() {
+		let dm_ignored = deepmind::BalanceChangeReason::Ignored;
+
 		let a = Address::zero();
 		let db = get_temp_state_db();
 		let (root, db) = {
 			let mut state = State::new(db, U256::from(0), Default::default());
-			state.add_balance(&a, &U256::default(), CleanupMode::ForceCreate).unwrap(); // create an empty account
+			state.add_balance(&a, &U256::default(), CleanupMode::ForceCreate, dm_ignored, deepmind::NoopTracer).unwrap(); // create an empty account
 			state.commit().unwrap();
 			state.drop()
 		};
@@ -1257,18 +1261,20 @@ mod tests {
 
 	#[test]
 	fn alter_balance() {
+		let dm_ignored = deepmind::BalanceChangeReason::Ignored;
+
 		let mut state = get_temp_state();
 		let a = Address::zero();
 		let b = Address::from_low_u64_be(1u64);
-		state.add_balance(&a, &U256::from(69u64), CleanupMode::NoEmpty).unwrap();
+		state.add_balance(&a, &U256::from(69u64), CleanupMode::NoEmpty, dm_ignored, deepmind::NoopTracer).unwrap();
 		assert_eq!(state.balance(&a).unwrap(), U256::from(69u64));
 		state.commit().unwrap();
 		assert_eq!(state.balance(&a).unwrap(), U256::from(69u64));
-		state.sub_balance(&a, &U256::from(42u64), &mut CleanupMode::NoEmpty).unwrap();
+		state.sub_balance(&a, &U256::from(42u64), &mut CleanupMode::NoEmpty, dm_ignored, deepmind::NoopTracer).unwrap();
 		assert_eq!(state.balance(&a).unwrap(), U256::from(27u64));
 		state.commit().unwrap();
 		assert_eq!(state.balance(&a).unwrap(), U256::from(27u64));
-		state.transfer_balance(&a, &b, &U256::from(18u64), CleanupMode::NoEmpty).unwrap();
+		state.transfer_balance(&a, &b, &U256::from(18u64), CleanupMode::NoEmpty, dm_ignored, dm_ignored, deepmind::NoopTracer).unwrap();
 		assert_eq!(state.balance(&a).unwrap(), U256::from(9u64));
 		assert_eq!(state.balance(&b).unwrap(), U256::from(18u64));
 		state.commit().unwrap();
@@ -1566,6 +1572,8 @@ mod tests {
 
 	#[test]
 	fn should_kill_garbage() {
+		let dm_ignored = deepmind::BalanceChangeReason::Ignored;
+
 		let a = Address::from_low_u64_be(10);
 		let b = Address::from_low_u64_be(20);
 		let c = Address::from_low_u64_be(30);
@@ -1575,10 +1583,10 @@ mod tests {
 		let db = get_temp_state_db();
 		let (root, db) = {
 			let mut state = State::new(db, U256::from(0), Default::default());
-			state.add_balance(&a, &U256::default(), CleanupMode::ForceCreate).unwrap(); // create an empty account
-			state.add_balance(&b, &100.into(), CleanupMode::ForceCreate).unwrap(); // create a dust account
-			state.add_balance(&c, &101.into(), CleanupMode::ForceCreate).unwrap(); // create a normal account
-			state.add_balance(&d, &99.into(), CleanupMode::ForceCreate).unwrap(); // create another dust account
+			state.add_balance(&a, &U256::default(), CleanupMode::ForceCreate, dm_ignored, deepmind::NoopTracer).unwrap(); // create an empty account
+			state.add_balance(&b, &100.into(), CleanupMode::ForceCreate, dm_ignored, deepmind::NoopTracer).unwrap(); // create a dust account
+			state.add_balance(&c, &101.into(), CleanupMode::ForceCreate, dm_ignored, deepmind::NoopTracer).unwrap(); // create a normal account
+			state.add_balance(&d, &99.into(), CleanupMode::ForceCreate, dm_ignored, deepmind::NoopTracer).unwrap(); // create another dust account
 			state.new_contract(&e, 100.into(), 1.into(), 0.into()).unwrap(); // create a contract account
 			state.init_code(&e, vec![0x00]).unwrap();
 			state.commit().unwrap();
@@ -1587,10 +1595,10 @@ mod tests {
 
 		let mut state = State::from_existing(db, root, U256::from(0u8), Default::default()).unwrap();
 		let mut touched = HashSet::new();
-		state.add_balance(&a, &U256::default(), CleanupMode::TrackTouched(&mut touched)).unwrap(); // touch an account
-		state.transfer_balance(&b, &x, &1.into(), CleanupMode::TrackTouched(&mut touched)).unwrap(); // touch an account decreasing its balance
-		state.transfer_balance(&c, &x, &1.into(), CleanupMode::TrackTouched(&mut touched)).unwrap(); // touch an account decreasing its balance
-		state.transfer_balance(&e, &x, &1.into(), CleanupMode::TrackTouched(&mut touched)).unwrap(); // touch an account decreasing its balance
+		state.add_balance(&a, &U256::default(), CleanupMode::TrackTouched(&mut touched), dm_ignored, deepmind::NoopTracer).unwrap(); // touch an account
+		state.transfer_balance(&b, &x, &1.into(), CleanupMode::TrackTouched(&mut touched), dm_ignored, dm_ignored, deepmind::NoopTracer).unwrap(); // touch an account decreasing its balance
+		state.transfer_balance(&c, &x, &1.into(), CleanupMode::TrackTouched(&mut touched), dm_ignored, dm_ignored, deepmind::NoopTracer).unwrap(); // touch an account decreasing its balance
+		state.transfer_balance(&e, &x, &1.into(), CleanupMode::TrackTouched(&mut touched), dm_ignored, dm_ignored, deepmind::NoopTracer).unwrap(); // touch an account decreasing its balance
 		state.kill_garbage(&touched, &None, false).unwrap();
 		assert!(!state.exists(&a).unwrap());
 		assert!(state.exists(&b).unwrap());
@@ -1607,11 +1615,13 @@ mod tests {
 
 	#[test]
 	fn should_trace_diff_suicided_accounts() {
+		let dm_ignored = deepmind::BalanceChangeReason::Ignored;
+
 		let a = Address::from_low_u64_be(10);
 		let db = get_temp_state_db();
 		let (root, db) = {
 			let mut state = State::new(db, U256::from(0), Default::default());
-			state.add_balance(&a, &100.into(), CleanupMode::ForceCreate).unwrap();
+			state.add_balance(&a, &100.into(), CleanupMode::ForceCreate, dm_ignored, deepmind::NoopTracer).unwrap();
 			state.commit().unwrap();
 			state.drop()
 		};

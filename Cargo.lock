@@ -18,6 +18,7 @@ version = "0.1.0"
 dependencies = [
  "account-db",
  "common-types",
+ "deepmind",
  "derive_more",
  "ethereum-types",
  "hash-db",
@@ -171,6 +172,7 @@ dependencies = [
  "block-reward",
  "client-traits",
  "common-types",
+ "deepmind",
  "derive_more",
  "engine",
  "env_logger 0.6.2",
@@ -266,6 +268,7 @@ version = "0.1.0"
 dependencies = [
  "client-traits",
  "common-types",
+ "deepmind",
  "engine",
  "ethcore",
  "ethcore-accounts",
@@ -403,6 +406,7 @@ name = "block-reward"
 version = "0.1.0"
 dependencies = [
  "common-types",
+ "deepmind",
  "engine",
  "ethabi",
  "ethabi-contract",
@@ -610,6 +614,7 @@ version = "0.1.0"
 dependencies = [
  "client-traits",
  "common-types",
+ "deepmind",
  "engine",
  "ethcore",
  "ethereum-types",
@@ -651,6 +656,7 @@ dependencies = [
 name = "common-types"
 version = "0.1.0"
 dependencies = [
+ "deepmind",
  "derive_more",
  "ethbloom",
  "ethcore-io",
@@ -867,10 +873,8 @@ dependencies = [
 name = "deepmind"
 version = "0.0.1"
 dependencies = [
- "common-types",
  "ethereum-types",
  "rustc-hex 2.1.0",
- "vm",
 ]
 
 [[package]]
@@ -978,6 +982,7 @@ version = "0.1.0"
 dependencies = [
  "client-traits",
  "common-types",
+ "deepmind",
  "ethcore-accounts",
  "ethcore-blockchain",
  "ethcore-builtin",
@@ -1114,6 +1119,7 @@ version = "0.1.0"
 dependencies = [
  "block-reward",
  "common-types",
+ "deepmind",
  "engine",
  "ethash",
  "ethcore",
@@ -1718,6 +1724,7 @@ version = "0.1.0"
 dependencies = [
  "bit-set",
  "criterion",
+ "deepmind",
  "ethereum-types",
  "hex-literal",
  "keccak-hash",
@@ -2296,6 +2303,7 @@ version = "0.1.0"
 dependencies = [
  "client-traits",
  "common-types",
+ "deepmind",
  "engine",
  "ethcore",
  "ethereum-types",
@@ -3015,6 +3023,7 @@ version = "0.1.0"
 dependencies = [
  "block-reward",
  "common-types",
+ "deepmind",
  "engine",
  "ethereum-types",
  "ethjson",
@@ -5300,6 +5309,7 @@ name = "trie-vm-factories"
 version = "0.1.0"
 dependencies = [
  "account-db",
+ "deepmind",
  "evm",
  "keccak-hasher 0.1.1",
  "patricia-trie-ethereum",
@@ -5465,6 +5475,7 @@ version = "0.1.0"
 dependencies = [
  "client-traits",
  "common-types",
+ "deepmind",
  "engine",
  "env_logger 0.6.2",
  "ethabi",
@@ -5567,6 +5578,7 @@ checksum = "078775d0255232fb988e6fccf26ddc9d1ac274299aaedcedce21c6f72cc533ce"
 name = "vm"
 version = "0.1.0"
 dependencies = [
+ "deepmind",
  "ethereum-types",
  "ethjson",
  "keccak-hash",
@@ -5614,6 +5626,7 @@ name = "wasm"
 version = "0.1.0"
 dependencies = [
  "byteorder",
+ "deepmind",
  "env_logger 0.5.13",
  "ethereum-types",
  "libc",

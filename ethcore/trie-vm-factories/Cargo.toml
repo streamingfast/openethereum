@@ -6,6 +6,7 @@ authors = ["Parity Technologies <admin@parity.io>"]
 edition = "2018"
 
 [dependencies]
+deepmind = { path = "../../deepmind" }
 trie-db = "0.20.0"
 ethtrie = { package = "patricia-trie-ethereum", path = "../../util/patricia-trie-ethereum" }
 account-db = { path = "../account-db" }

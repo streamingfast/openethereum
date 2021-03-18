@@ -601,7 +601,7 @@ impl Miner {
 		let elapsed = block_start.elapsed();
 		debug!(target: "miner", "Pushed {} transactions in {} ms", tx_count, took_ms(&elapsed));
 
-		let block = match open_block.close() {
+		let block = match open_block.close(&self.dm_context) {
 			Ok(block) => block,
 			Err(err) => {
 				warn!(target: "miner", "Closing the block failed with error {:?}. This is likely an error in chain specificiations or on-chain consensus smart contracts.", err);

@@ -392,13 +392,18 @@ impl<B: Backend> State<B> {
 
 	/// Create a new contract at address `contract`. If there is already an account at the address
 	/// it will have its code reset, ready for `init_code()`.
-	pub fn new_contract(&mut self, contract: &Address, balance: U256, nonce_offset: U256, version: U256) -> TrieResult<()> {
+	pub fn new_contract<DM>(&mut self, contract: &Address, balance: U256, nonce_offset: U256, version: U256, reason: deepmind::BalanceChangeReason, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
 		let original_storage_root = self.original_storage_root(contract)?;
 		let (nonce, overflow) = self.account_start_nonce.overflowing_add(nonce_offset);
 		if overflow {
 			return Err(Box::new(TrieError::DecoderError(H256::from(*contract), rlp::DecoderError::Custom("Nonce overflow".into()))));
 		}
 		self.insert_cache(contract, AccountEntry::new_dirty(Some(Account::new_contract(balance, nonce, version, original_storage_root))));
+
+		if dm_tracer.is_enabled() && !balance.is_zero() {
+			dm_tracer.record_balance_change(contract, &U256::from(0), &balance, reason);
+		}
+
 		Ok(())
 	}
 
@@ -637,11 +642,11 @@ impl<B: Backend> State<B> {
 	}
 
 	/// Add `incr` to the balance of account `a`.
-	pub fn add_balance(&mut self, a: &Address, incr: &U256, cleanup_mode: CleanupMode) -> TrieResult<()> {
+	pub fn add_balance<DM>(&mut self, a: &Address, incr: &U256, cleanup_mode: CleanupMode, reason: deepmind::BalanceChangeReason, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
 		trace!(target: "state", "add_balance({}, {}): {}", a, incr, self.balance(a)?);
 		let is_value_transfer = !incr.is_zero();
 		if is_value_transfer || (cleanup_mode == CleanupMode::ForceCreate && !self.exists(a)?) {
-			self.require(a, false)?.add_balance(incr);
+			self.require(a, false)?.add_balance(incr, reason, a, dm_tracer);
 		} else if let CleanupMode::TrackTouched(set) = cleanup_mode {
 			if self.exists(a)? {
 				set.insert(*a);
@@ -652,10 +657,10 @@ impl<B: Backend> State<B> {
 	}
 
 	/// Subtract `decr` from the balance of account `a`.
-	pub fn sub_balance(&mut self, a: &Address, decr: &U256, cleanup_mode: &mut CleanupMode) -> TrieResult<()> {
+	pub fn sub_balance<DM>(&mut self, a: &Address, decr: &U256, cleanup_mode: &mut CleanupMode, reason: deepmind::BalanceChangeReason, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
 		trace!(target: "state", "sub_balance({}, {}): {}", a, decr, self.balance(a)?);
 		if !decr.is_zero() || !self.exists(a)? {
-			self.require(a, false)?.sub_balance(decr);
+			self.require(a, false)?.sub_balance(decr, reason, a, dm_tracer);
 		}
 		if let CleanupMode::TrackTouched(ref mut set) = *cleanup_mode {
 			set.insert(*a);
@@ -664,9 +669,9 @@ impl<B: Backend> State<B> {
 	}
 
 	/// Subtracts `by` from the balance of `from` and adds it to that of `to`.
-	pub fn transfer_balance(&mut self, from: &Address, to: &Address, by: &U256, mut cleanup_mode: CleanupMode) -> TrieResult<()> {
-		self.sub_balance(from, by, &mut cleanup_mode)?;
-		self.add_balance(to, by, cleanup_mode)?;
+	pub fn transfer_balance<DM>(&mut self, from: &Address, to: &Address, by: &U256, mut cleanup_mode: CleanupMode, from_reason: deepmind::BalanceChangeReason, to_reason: deepmind::BalanceChangeReason, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
+		self.sub_balance(from, by, &mut cleanup_mode, from_reason, dm_tracer)?;
+		self.add_balance(to, by, cleanup_mode, to_reason, dm_tracer)?;
 		Ok(())
 	}
 

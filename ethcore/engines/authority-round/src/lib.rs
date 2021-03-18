@@ -1515,6 +1515,7 @@ impl Engine for AuthorityRound {
 		&self,
 		block: &mut ExecutedBlock,
 		epoch_begin: bool,
+		_dm_context: &deepmind::Context,
 	) -> Result<(), Error> {
 		// with immediate transitions, we don't use the epoch mechanism anyway.
 		// the genesis is always considered an epoch, but we ignore it intentionally.
@@ -1543,6 +1544,7 @@ impl Engine for AuthorityRound {
 		&self,
 		block: &mut ExecutedBlock,
 		parent: &Header,
+		dm_context: &deepmind::Context,
 	) -> Result<(), Error> {
 		let mut beneficiaries = Vec::new();
 
@@ -1582,7 +1584,7 @@ impl Engine for AuthorityRound {
 			beneficiaries.into_iter().map(|(author, reward_kind)| (author, reward_kind, self.block_reward)).collect()
 		};
 
-		block_reward::apply_block_rewards(&rewards, block, &self.machine)
+		block_reward::apply_block_rewards(&rewards, block, &self.machine, dm_context)
 	}
 
 	fn generate_engine_transactions(&self, block: &ExecutedBlock) -> Result<Vec<SignedTransaction>, Error> {

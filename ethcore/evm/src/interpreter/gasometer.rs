@@ -106,14 +106,14 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 	/// We guarantee that the final element of the returned tuple (`provided`) will be `Some`
 	/// iff the `instruction` is one of `CREATE`, or any of the `CALL` variants. In this case,
 	/// it will be the amount of gas that the current context provides to the child context.
-	pub fn requirements(
+	pub fn requirements<DM>(
 		&mut self,
-		ext: &dyn vm::Ext,
+		ext: &dyn vm::Ext<DM>,
 		instruction: Instruction,
 		info: &InstructionInfo,
 		stack: &dyn Stack<U256>,
 		current_mem_size: usize,
-	) -> vm::Result<InstructionRequirements<Gas>> {
+	) -> vm::Result<InstructionRequirements<Gas>> where DM: deepmind::Tracer {
 		let schedule = ext.schedule();
 		let tier = info.tier.idx();
 		let default_gas = Gas::from(schedule.tier_step_gas[tier]);
@@ -236,7 +236,7 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 
 				Request::GasMemProvide(gas, mem, Some(requested))
 			},
-			instructions::STATICCALL => {				
+			instructions::STATICCALL => {
 				let code_address = u256_to_address(stack.peek(1));
 				let gas = if code_address <= PRECOMPILES_ADDRESS_LIMIT {
 					Gas::from(schedule.staticcall_precompile_gas)
@@ -245,7 +245,7 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 				};
 
 				let mem = cmp::max(
-					mem_needed(stack.peek(4), stack.peek(5))?, // out_off, out_size 
+					mem_needed(stack.peek(4), stack.peek(5))?, // out_off, out_size
 					mem_needed(stack.peek(2), stack.peek(3))?  // in_off, in_size
 				);
 
@@ -433,7 +433,7 @@ fn calculate_eip1283_sstore_gas<Gas: evm::CostType>(schedule: &Schedule, origina
 	)
 }
 
-pub fn handle_eip1283_sstore_clears_refund(ext: &mut dyn vm::Ext, original: &U256, current: &U256, new: &U256) {
+pub fn handle_eip1283_sstore_clears_refund<DM>(ext: &mut dyn vm::Ext<DM>, original: &U256, current: &U256, new: &U256) where DM: deepmind::Tracer {
 	let sstore_clears_schedule = ext.schedule().sstore_refund_gas;
 
 	if current == new {

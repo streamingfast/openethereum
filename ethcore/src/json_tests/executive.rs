@@ -103,7 +103,7 @@ impl<'a, T: 'a, V: 'a, B: 'a> TestExt<'a, T, V, B>
 		let static_call = false;
 		Ok(TestExt {
 			nonce: state.nonce(&address)?,
-			ext: Externalities::new(state, info, machine, schedule, depth, 0, origin_info, substate, output, tracer, vm_tracer, static_call),
+			ext: Externalities::new(state, info, machine, schedule, depth, 0, origin_info, substate, output, tracer, vm_tracer, static_call, deepmind::NoopTracer),
 			callcreates: vec![],
 			sender: address,
 		})
@@ -204,8 +204,8 @@ impl<'a, T: 'a, V: 'a, B: 'a> Ext for TestExt<'a, T, V, B>
 		self.ext.ret(gas, data, apply_state)
 	}
 
-	fn suicide(&mut self, refund_address: &Address) -> vm::Result<()> {
-		self.ext.suicide(refund_address)
+	fn suicide<DM>(&mut self, refund_address: &Address, dm_tracer: &mut DM) -> vm::Result<()> where DM: deepmind::Tracer {
+		self.ext.suicide(refund_address, dm_tracer)
 	}
 
 	fn schedule(&self) -> &Schedule {

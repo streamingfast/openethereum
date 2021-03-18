@@ -458,6 +458,27 @@ impl SignedTransaction {
 	pub fn deconstruct(self) -> (UnverifiedTransaction, Address, Option<Public>) {
 		(self.transaction, self.sender, self.public)
 	}
+
+	/// Deep Mind data conversion into appropriate type, done like this to avoid dependency cycles between deepmind module and this one
+	pub fn to_deepmind_transaction(&self) -> deepmind::Transaction {
+		let mut to: Option<Address> = None;
+		if let Action::Call(address) = self.action {
+			to = Some(address)
+		};
+
+		deepmind::Transaction {
+			hash: self.hash,
+			from: self.sender,
+			to,
+			value: self.value,
+			gas_limit: self.gas.as_u64(),
+			gas_price: self.gas_price,
+			nonce: self.nonce.as_u64(),
+			data: &self.data,
+			signature: self.signature_for_deepmind(),
+		}
+	}
+
 }
 
 /// Signed Transaction that is a part of canon blockchain.

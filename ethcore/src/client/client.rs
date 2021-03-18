@@ -175,9 +175,6 @@ struct Importer {
 
 	/// A lru cache of recently detected bad blocks
 	pub bad_blocks: bad_blocks::BadBlocks,
-
-	/// Deep Mind context used by this specific importer
-	pub dm_context: deepmind::Context,
 }
 
 /// Blockchain database client backed by a persistent database. Owns and manages a blockchain and a block queue.
@@ -252,6 +249,9 @@ pub struct Client {
 	exit_handler: Mutex<Option<Box<dyn Fn(String) + 'static + Send>>>,
 
 	importer: Importer,
+
+	/// Deep Mind context used throughout the lifecycle of the Client
+	dm_context: deepmind::Context,
 }
 
 impl Importer {
@@ -260,7 +260,6 @@ impl Importer {
 		engine: Arc<dyn Engine>,
 		message_channel: IoChannel<ClientIoMessage<Client>>,
 		miner: Arc<Miner>,
-		dm_context: deepmind::Context,
 	) -> Result<Importer, EthcoreError> {
 		let block_queue = BlockQueue::new(
 			config.queue.clone(),
@@ -276,7 +275,6 @@ impl Importer {
 			ancient_verifier: AncientVerifier::new(engine.clone()),
 			engine,
 			bad_blocks: Default::default(),
-			dm_context,
 		})
 	}
 
@@ -426,8 +424,9 @@ impl Importer {
 
 		let is_epoch_begin = chain.epoch_transition(parent.number(), *header.parent_hash()).is_some();
 
-		if self.dm_context.is_enabled() {
-			self.dm_context.start_block(header.number());
+		let dm_context = &client.dm_context;
+		if dm_context.is_enabled() {
+			dm_context.start_block(header.number());
 		}
 
 		let enact_result = enact(
@@ -441,7 +440,7 @@ impl Importer {
 			last_hashes,
 			client.factories.clone(),
 			is_epoch_begin,
-			&self.dm_context,
+			dm_context,
 		);
 
 		let mut locked_block = match enact_result {
@@ -452,8 +451,8 @@ impl Importer {
 			}
 		};
 
-		if self.dm_context.is_finalize_block_enabled() {
-			self.dm_context.finalize_block(header.number());
+		if dm_context.is_finalize_block_enabled() {
+			dm_context.finalize_block(header.number());
 		}
 
 		// Strip receipts for blocks before validate_receipts_transition,
@@ -478,8 +477,10 @@ impl Importer {
 			client
 		)?;
 
-		if self.dm_context.is_enabled() {
-			self.dm_context.end_block(block_bytes.len() as u64, header, &locked_block.uncles);
+		if dm_context.is_enabled() {
+			// FIXME: Transform Header and Vec<Header> (for uncles) into proper deepmind types that can be forwarded
+			// dm_context.end_block(header, block_bytes.len() as u64, &locked_block.uncles);
+			dm_context.end_block(header.number(), block_bytes.len() as u64);
 		}
 
 		Ok((locked_block, pending))
@@ -782,6 +783,13 @@ impl Client {
 
 		let awake = match config.mode { Mode::Dark(..) | Mode::Off => false, _ => true };
 
+		let importer = Importer::new(&config, engine.clone(), message_channel.clone(), miner)?;
+
+		let registrar_address = engine.machine().params().registrar;
+		if let Some(ref addr) = registrar_address {
+			trace!(target: "client", "Found registrar at {}", addr);
+		}
+
 		let dm_config = &config.dm_config;
 		info!(target: "client", "Initializing deep mind ({:?})", dm_config);
 		let dm_context = match dm_config.enabled || dm_config.on_block_progress {
@@ -799,13 +807,6 @@ impl Client {
 			},
 			_ => deepmind::Context::noop(),
 		};
-
-		let importer = Importer::new(&config, engine.clone(), message_channel.clone(), miner, dm_context)?;
-
-		let registrar_address = engine.machine().params().registrar;
-		if let Some(ref addr) = registrar_address {
-			trace!(target: "client", "Found registrar at {}", addr);
-		}
 
 		let client = Arc::new(Client {
 			enabled: AtomicBool::new(true),
@@ -835,6 +836,7 @@ impl Client {
 			exit_handler: Mutex::new(None),
 			importer,
 			config,
+			dm_context,
 		});
 
 		// ensure genesis epoch proof in the DB.
@@ -2398,6 +2400,7 @@ impl PrepareOpenBlock for Client {
 			gas_range_target,
 			extra_data,
 			is_epoch_begin,
+			&self.dm_context,
 		)?;
 
 		// Add uncles

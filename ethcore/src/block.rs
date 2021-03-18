@@ -112,6 +112,7 @@ impl<'x> OpenBlock<'x> {
 		gas_range_target: (U256, U256),
 		extra_data: Bytes,
 		is_epoch_begin: bool,
+		dm_context: &deepmind::Context,
 	) -> Result<Self, Error> {
 		let number = parent.number() + 1;
 		let state = State::from_existing(db, parent.state_root().clone(), engine.account_start_nonce(number), factories)?;
@@ -129,8 +130,8 @@ impl<'x> OpenBlock<'x> {
 		engine.machine().populate_from_parent(&mut r.block.header, parent, gas_floor_target, gas_ceil_target);
 		engine.populate_from_parent(&mut r.block.header, parent);
 
-		engine.machine().on_new_block(&mut r.block)?;
-		engine.on_new_block(&mut r.block, is_epoch_begin)?;
+		engine.machine().on_new_block(&mut r.block, dm_context)?;
+		engine.on_new_block(&mut r.block, is_epoch_begin, dm_context)?;
 
 		Ok(r)
 	}
@@ -173,7 +174,7 @@ impl<'x> OpenBlock<'x> {
 		}
 
 		if dm_context.is_enabled() {
-			dm_context.start_transaction(&t);
+			dm_context.start_transaction(t.to_deepmind_transaction());
 		}
 
 		let env_info = self.block.env_info();
@@ -241,10 +242,10 @@ impl<'x> OpenBlock<'x> {
 	}
 
 	/// Turn this into a `ClosedBlock`.
-	pub fn close(self) -> Result<ClosedBlock, Error> {
+	pub fn close(self, dm_context: &deepmind::Context) -> Result<ClosedBlock, Error> {
 		let unclosed_state = self.block.state.clone();
 		let parent = self.parent.clone();
-		let locked = self.close_and_lock()?;
+		let locked = self.close_and_lock(dm_context)?;
 
 		Ok(ClosedBlock {
 			block: locked.block,
@@ -254,9 +255,9 @@ impl<'x> OpenBlock<'x> {
 	}
 
 	/// Turn this into a `LockedBlock`.
-	pub fn close_and_lock(self) -> Result<LockedBlock, Error> {
+	pub fn close_and_lock(self, dm_context: &deepmind::Context) -> Result<LockedBlock, Error> {
 		let mut s = self;
-		s.engine.on_close_block(&mut s.block, &s.parent)?;
+		s.engine.on_close_block(&mut s.block, &s.parent, dm_context)?;
 		s.block.state.commit()?;
 
 		s.block.header.set_transactions_root(ordered_trie_root(s.block.transactions.iter().map(|e| e.rlp_bytes())));
@@ -448,6 +449,7 @@ pub(crate) fn enact(
 		(3141562.into(), 31415620.into()),
 		vec![],
 		is_epoch_begin,
+		dm_context,
 	)?;
 
 	if let Some(ref s) = trace_state {
@@ -465,7 +467,7 @@ pub(crate) fn enact(
 		b.push_uncle(u)?;
 	}
 
-	b.close_and_lock()
+	b.close_and_lock(dm_context)
 }
 
 #[cfg(test)]

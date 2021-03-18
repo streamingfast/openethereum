@@ -29,14 +29,15 @@ pub struct RuntimeContext {
 	pub value: U256,
 }
 
-pub struct Runtime<'a> {
+pub struct Runtime<'a, DM> where DM: deepmind::Tracer {
 	gas_counter: u64,
 	gas_limit: u64,
-	ext: &'a mut dyn vm::Ext,
+	ext: &'a mut dyn vm::Ext<DM>,
 	context: RuntimeContext,
 	memory: MemoryRef,
 	args: Vec<u8>,
 	result: Vec<u8>,
+	dm_tracer: &'a mut DM,
 }
 
 /// User trap in native code
@@ -143,16 +144,17 @@ impl ::std::fmt::Display for Error {
 
 type Result<T> = ::std::result::Result<T, Error>;
 
-impl<'a> Runtime<'a> {
+impl<'a, DM> Runtime<'a, DM> where DM: deepmind::Tracer {
 
 	/// New runtime for wasm contract with specified params
 	pub fn with_params(
-		ext: &mut dyn vm::Ext,
+		ext: &'a mut dyn vm::Ext<DM>,
 		memory: MemoryRef,
 		gas_limit: u64,
 		args: Vec<u8>,
 		context: RuntimeContext,
-	) -> Runtime {
+		dm_tracer: &'a mut DM,
+	) -> Runtime<'a, DM> {
 		Runtime {
 			gas_counter: 0,
 			gas_limit: gas_limit,
@@ -161,6 +163,7 @@ impl<'a> Runtime<'a> {
 			context: context,
 			args: args,
 			result: Vec::new(),
+			dm_tracer: dm_tracer,
 		}
 	}
 
@@ -451,7 +454,8 @@ impl<'a> Runtime<'a> {
 			&payload,
 			&address,
 			call_type,
-			false
+			false,
+			self.dm_tracer,
 		).ok().expect("Trap is false; trap error will not happen; qed");
 
 		match call_result {
@@ -530,7 +534,7 @@ impl<'a> Runtime<'a> {
 			* U256::from(self.ext.schedule().wasm().opcodes_mul)
 			/ U256::from(self.ext.schedule().wasm().opcodes_div);
 
-		match self.ext.create(&gas_left, &endowment, &code, &self.context.code_version, scheme, false).ok().expect("Trap is false; trap error will not happen; qed") {
+		match self.ext.create(&gas_left, &endowment, &code, &self.context.code_version, scheme, false, self.dm_tracer).ok().expect("Trap is false; trap error will not happen; qed") {
 			vm::ContractCreateResult::Created(address, gas_left) => {
 				self.memory.set(result_ptr, address.as_bytes())?;
 				self.gas_counter = self.gas_limit -
@@ -637,7 +641,7 @@ impl<'a> Runtime<'a> {
 			self.adjusted_charge(|schedule| schedule.suicide_to_new_account_cost as u64)?;
 		}
 
-		self.ext.suicide(&refund_address).map_err(|_| Error::SuicideAbort)?;
+		self.ext.suicide(&refund_address, self.dm_tracer).map_err(|_| Error::SuicideAbort)?;
 
 		// We send trap to interpreter so it should abort further execution
 		Err(Error::Suicide.into())
@@ -646,7 +650,7 @@ impl<'a> Runtime<'a> {
 	///	Signature: `fn blockhash(number: i64, dest: *mut u8)`
 	pub fn blockhash(&mut self, args: RuntimeArgs) -> Result<()> {
 		self.adjusted_charge(|schedule| schedule.blockhash_gas as u64)?;
-		let hash = self.ext.blockhash(&U256::from(args.nth_checked::<u64>(0)?));
+		let hash = self.ext.blockhash(&U256::from(args.nth_checked::<u64>(0)?), self.dm_tracer);
 		self.memory.set(args.nth_checked(1)?, hash.as_bytes())?;
 
 		Ok(())
@@ -762,7 +766,7 @@ mod ext_impl {
 		{ $e: expr } => { { Ok(Some($e)) } }
 	}
 
-	impl<'a> Externals for super::Runtime<'a> {
+	impl<'a, DM> Externals for super::Runtime<'a, DM> where DM: deepmind::Tracer {
 		fn invoke_index(
 			&mut self,
 			index: usize,

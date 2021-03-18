@@ -187,10 +187,10 @@ pub struct Interpreter<Cost: CostType> {
 	_type: PhantomData<Cost>,
 }
 
-impl<Cost: 'static + CostType> vm::Exec for Interpreter<Cost> {
-	fn exec(mut self: Box<Self>, ext: &mut dyn vm::Ext) -> vm::ExecTrapResult<GasLeft> {
+impl<Cost: 'static + CostType, DM> vm::Exec<DM> for Interpreter<Cost> where DM: deepmind::Tracer {
+	fn exec(mut self: Box<Self>, ext: &mut dyn vm::Ext<DM>, dm_tracer: &mut DM) -> vm::ExecTrapResult<GasLeft, DM> {
 		loop {
-			let result = self.step(ext);
+			let result = self.step(ext, dm_tracer);
 			match result {
 				InterpreterResult::Continue => {},
 				InterpreterResult::Done(value) => return Ok(value),
@@ -208,8 +208,8 @@ impl<Cost: 'static + CostType> vm::Exec for Interpreter<Cost> {
 	}
 }
 
-impl<Cost: 'static + CostType> vm::ResumeCall for Interpreter<Cost> {
-	fn resume_call(mut self: Box<Self>, result: MessageCallResult) -> Box<dyn vm::Exec> {
+impl<Cost: 'static + CostType, DM> vm::ResumeCall<DM> for Interpreter<Cost> where DM: deepmind::Tracer {
+	fn resume_call(mut self: Box<Self>, result: MessageCallResult) -> Box<dyn vm::Exec<DM>> {
 		{
 			let this = &mut *self;
 			let (out_off, out_size) = this.resume_output_range.take().expect("Box<ResumeCall> is obtained from a call opcode; resume_output_range is always set after those opcodes are executed; qed");
@@ -243,8 +243,8 @@ impl<Cost: 'static + CostType> vm::ResumeCall for Interpreter<Cost> {
 	}
 }
 
-impl<Cost: 'static + CostType> vm::ResumeCreate for Interpreter<Cost> {
-	fn resume_create(mut self: Box<Self>, result: ContractCreateResult) -> Box<dyn vm::Exec> {
+impl<Cost: 'static + CostType, DM> vm::ResumeCreate<DM> for Interpreter<Cost> where DM: deepmind::Tracer {
+	fn resume_create(mut self: Box<Self>, result: ContractCreateResult) -> Box<dyn vm::Exec<DM>> {
 		match result {
 			ContractCreateResult::Created(address, gas_left) => {
 				self.stack.push(address_to_u256(address));
@@ -292,7 +292,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 
 	/// Execute a single step on the VM.
 	#[inline(always)]
-	pub fn step(&mut self, ext: &mut dyn vm::Ext) -> InterpreterResult {
+	pub fn step<DM>(&mut self, ext: &mut dyn vm::Ext<DM>, dm_tracer: &mut DM) -> InterpreterResult where DM: deepmind::Tracer {
 		if self.done {
 			return InterpreterResult::Stopped;
 		}
@@ -307,7 +307,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 				.as_u256();
 			InterpreterResult::Done(Ok(GasLeft::Known(current_gas)))
 		} else {
-			self.step_inner(ext)
+			self.step_inner(ext, dm_tracer)
 		};
 
 		if let &InterpreterResult::Done(_) = &result {
@@ -319,7 +319,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 
 	/// Inner helper function for step.
 	#[inline(always)]
-	fn step_inner(&mut self, ext: &mut dyn vm::Ext) -> InterpreterResult {
+	fn step_inner<DM>(&mut self, ext: &mut dyn vm::Ext<DM>, dm_tracer: &mut DM) -> InterpreterResult where DM: deepmind::Tracer {
 		let result = match self.resume_result.take() {
 			Some(result) => result,
 			None => {
@@ -368,7 +368,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 				// Execute instruction
 				let current_gas = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas;
 				let result = match self.exec_instruction(
-					current_gas, ext, instruction, requirements.provide_gas
+					current_gas, ext, instruction, requirements.provide_gas, dm_tracer
 				) {
 					Err(x) => {
 						if self.do_trace {
@@ -433,7 +433,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 		InterpreterResult::Continue
 	}
 
-	fn verify_instruction(&self, ext: &dyn vm::Ext, instruction: Instruction, info: &InstructionInfo) -> vm::Result<()> {
+	fn verify_instruction<DM>(&self, ext: &dyn vm::Ext<DM>, instruction: Instruction, info: &InstructionInfo) -> vm::Result<()> where DM: deepmind::Tracer {
 		let schedule = ext.schedule();
 
 		if (instruction == instructions::DELEGATECALL && !schedule.have_delegate_call) ||
@@ -499,13 +499,14 @@ impl<Cost: CostType> Interpreter<Cost> {
 		}
 	}
 
-	fn exec_instruction(
+	fn exec_instruction<DM>(
 		&mut self,
 		gas: Cost,
-		ext: &mut dyn vm::Ext,
+		ext: &mut dyn vm::Ext<DM>,
 		instruction: Instruction,
-		provided: Option<Cost>
-	) -> vm::Result<InstructionResult<Cost>> {
+		provided: Option<Cost>,
+		dm_tracer: &mut DM,
+	) -> vm::Result<InstructionResult<Cost>> where DM: deepmind::Tracer {
 		match instruction {
 			instructions::JUMP => {
 				let jump = self.stack.pop_back();
@@ -561,6 +562,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 					&self.params.code_version,
 					address_scheme,
 					true,
+					dm_tracer,
 				);
 				return match create_result {
 					Ok(ContractCreateResult::Created(address, gas_left)) => {
@@ -637,7 +639,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 
 				let call_result = {
 					let input = self.mem.read_slice(in_off, in_size);
-					ext.call(&call_gas.as_u256(), sender_address, receive_address, value, input, &code_address, call_type, true)
+					ext.call(&call_gas.as_u256(), sender_address, receive_address, value, input, &code_address, call_type, true, dm_tracer)
 				};
 
 				self.resume_output_range = Some((out_off, out_size));
@@ -687,7 +689,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 			},
 			instructions::SUICIDE => {
 				let address = self.stack.pop_back();
-				ext.suicide(&u256_to_address(&address))?;
+				ext.suicide(&u256_to_address(&address), dm_tracer)?;
 				return Ok(InstructionResult::StopExecution);
 			},
 			instructions::LOG0 | instructions::LOG1 | instructions::LOG2 | instructions::LOG3 | instructions::LOG4 => {
@@ -850,7 +852,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 			},
 			instructions::BLOCKHASH => {
 				let block_number = self.stack.pop_back();
-				let block_hash = ext.blockhash(&block_number);
+				let block_hash = ext.blockhash(&block_number, dm_tracer);
 				self.stack.push(block_hash.into_uint());
 			},
 			instructions::COINBASE => {
@@ -1225,7 +1227,7 @@ mod tests {
 	use vm::tests::{FakeExt, test_finalize};
 	use ethereum_types::Address;
 
-	fn interpreter(params: ActionParams, ext: &dyn vm::Ext) -> Box<dyn Exec> {
+	fn interpreter(params: ActionParams, ext: &dyn vm::Ext<deepmind::NoopTracer>) -> Box<dyn Exec<deepmind::NoopTracer>> {
 		Factory::new(1).create(params, ext.schedule(), ext.depth())
 	}
 
@@ -1245,7 +1247,7 @@ mod tests {
 
 		let gas_left = {
 			let vm = interpreter(params, &ext);
-			test_finalize(vm.exec(&mut ext).ok().unwrap()).unwrap()
+			test_finalize(vm.exec(&mut ext, &mut deepmind::NoopTracer).ok().unwrap()).unwrap()
 		};
 
 		assert_eq!(ext.calls.len(), 1);
@@ -1267,7 +1269,7 @@ mod tests {
 
 		let err = {
 			let vm = interpreter(params, &ext);
-			test_finalize(vm.exec(&mut ext).ok().unwrap()).err().unwrap()
+			test_finalize(vm.exec(&mut ext, &mut deepmind::NoopTracer).ok().unwrap()).err().unwrap()
 		};
 
 		assert_eq!(err, ::vm::Error::OutOfBounds);

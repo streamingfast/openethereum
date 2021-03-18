@@ -169,6 +169,7 @@ pub trait Engine: Sync + Send {
 		&self,
 		_block: &mut ExecutedBlock,
 		_epoch_begin: bool,
+		_dm_context: &deepmind::Context,
 	) -> Result<(), Error> {
 		Ok(())
 	}
@@ -178,6 +179,7 @@ pub trait Engine: Sync + Send {
 		&self,
 		_block: &mut ExecutedBlock,
 		_parent_header: &Header,
+		_dm_context: &deepmind::Context,
 	) -> Result<(), Error> {
 		Ok(())
 	}

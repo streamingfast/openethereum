@@ -6,10 +6,8 @@ authors = ["dfuse Developers <developers@dfuse.io>"]
 edition = "2018"
 
 [dependencies]
-common-types = { path = "../ethcore/types" }
 ethereum-types = "0.9.0"
 rustc-hex = "2.1.0"
-vm = { path = "../ethcore/vm" }
 
 [features]
 default = []

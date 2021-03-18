@@ -42,21 +42,21 @@ pub use return_data::{ReturnData, GasLeft};
 pub use error::{Error, Result, TrapResult, TrapError, TrapKind, ExecTrapResult, ExecTrapError};
 
 /// Virtual Machine interface
-pub trait Exec: Send {
+pub trait Exec<DM>: Send where DM: deepmind::Tracer {
 	/// This function should be used to execute transaction.
 	/// It returns either an error, a known amount of gas left, or parameters to be used
 	/// to compute the final gas left.
-	fn exec(self: Box<Self>, ext: &mut dyn Ext) -> ExecTrapResult<GasLeft>;
+	fn exec(self: Box<Self>, ext: &mut dyn Ext<DM>, dm_tracer: &mut DM) -> ExecTrapResult<GasLeft, DM>;
 }
 
 /// Resume call interface
-pub trait ResumeCall: Send {
+pub trait ResumeCall<DM>: Send where DM: deepmind::Tracer {
 	/// Resume an execution for call, returns back the Vm interface.
-	fn resume_call(self: Box<Self>, result: MessageCallResult) -> Box<dyn Exec>;
+	fn resume_call(self: Box<Self>, result: MessageCallResult) -> Box<dyn Exec<DM>>;
 }
 
 /// Resume create interface
-pub trait ResumeCreate: Send {
+pub trait ResumeCreate<DM>: Send where DM: deepmind::Tracer {
 	/// Resume an execution from create, returns back the Vm interface.
-	fn resume_create(self: Box<Self>, result: ContractCreateResult) -> Box<dyn Exec>;
+	fn resume_create(self: Box<Self>, result: ContractCreateResult) -> Box<dyn Exec<DM>>;
 }

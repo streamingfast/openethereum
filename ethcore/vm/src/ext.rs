@@ -64,7 +64,7 @@ pub enum CreateContractAddress {
 }
 
 /// Externalities interface for EVMs
-pub trait Ext {
+pub trait Ext<DM> where DM: deepmind::Tracer {
 	/// Returns the storage value for a given key if reversion happens on the current transaction.
 	fn initial_storage_at(&self, key: &H256) -> Result<H256>;
 
@@ -87,7 +87,7 @@ pub trait Ext {
 	fn balance(&self, address: &Address) -> Result<U256>;
 
 	/// Returns the hash of one of the 256 most recent complete blocks.
-	fn blockhash(&mut self, number: &U256) -> H256;
+	fn blockhash(&mut self, number: &U256, dm_tracer: &mut DM) -> H256;
 
 	/// Creates new contract.
 	///
@@ -100,6 +100,7 @@ pub trait Ext {
 		parent_version: &U256,
 		address: CreateContractAddress,
 		trap: bool,
+		dm_tracer: &mut DM,
 	) -> ::std::result::Result<ContractCreateResult, TrapKind>;
 
 	/// Message call.
@@ -116,7 +117,8 @@ pub trait Ext {
 		data: &[u8],
 		code_address: &Address,
 		call_type: ActionType,
-		trap: bool
+		trap: bool,
+		dm_tracer: &mut DM,
 	) -> ::std::result::Result<MessageCallResult, TrapKind>;
 
 	/// Returns code at given address
@@ -137,7 +139,7 @@ pub trait Ext {
 
 	/// Should be called when contract commits suicide.
 	/// Address to which funds should be refunded.
-	fn suicide(&mut self, refund_address: &Address) -> Result<()> ;
+	fn suicide(&mut self, refund_address: &Address, dm_tracer: &mut DM) -> Result<()>;
 
 	/// Returns schedule.
 	fn schedule(&self) -> &Schedule;

@@ -16,7 +16,7 @@
 
 //! Ethereum-like state machine definition.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap};
 use std::cmp;
 use std::sync::Arc;
 
@@ -197,16 +197,28 @@ impl Machine {
 
 	/// Logic to perform on a new block: updating last hashes and the DAO
 	/// fork, for ethash.
-	pub fn on_new_block(&self, block: &mut ExecutedBlock) -> Result<(), Error> {
+	pub fn on_new_block(&self, block: &mut ExecutedBlock, dm_context: &deepmind::Context) -> Result<(), Error> {
 		self.push_last_hash(block)?;
 
 		if let Some(ref ethash_params) = self.ethash_extensions {
 			if block.header.number() == ethash_params.dao_hardfork_transition {
 				let state = block.state_mut();
-				for child in &ethash_params.dao_hardfork_accounts {
-					let beneficiary = &ethash_params.dao_hardfork_beneficiary;
-					state.balance(child)
-						.and_then(|b| state.transfer_balance(child, beneficiary, &b, CleanupMode::NoEmpty))?;
+				if dm_context.is_enabled() {
+					let mut dm_tracer = dm_context.block_tracer();
+
+					for child in &ethash_params.dao_hardfork_accounts {
+						let beneficiary = &ethash_params.dao_hardfork_beneficiary;
+						state.balance(child)
+							.and_then(|b| state.transfer_balance(child, beneficiary, &b, CleanupMode::NoEmpty, deepmind::BalanceChangeReason::DaoAdjustBalance, deepmind::BalanceChangeReason::DaoRefundContract, &mut dm_tracer))?;
+					}
+				} else {
+					// Deep Mind: I was not able to use a dynamic Trait object to avoi duplicating the code below. The for-loop
+					//            below and above must be kept in sync the only difference being the Ignored and NoopTracer.
+					for child in &ethash_params.dao_hardfork_accounts {
+						let beneficiary = &ethash_params.dao_hardfork_beneficiary;
+						state.balance(child)
+							.and_then(|b| state.transfer_balance(child, beneficiary, &b, CleanupMode::NoEmpty, deepmind::BalanceChangeReason::Ignored, deepmind::BalanceChangeReason::Ignored, &mut deepmind::NoopTracer))?;
+					}
 				}
 			}
 		}
@@ -383,8 +395,8 @@ impl Machine {
 	}
 
 	/// Increment the balance of an account in the state of the live block.
-	pub fn add_balance(&self, live: &mut ExecutedBlock, address: &Address, amount: &U256) -> Result<(), Error> {
-		live.state_mut().add_balance(address, amount, CleanupMode::NoEmpty).map_err(Into::into)
+	pub fn add_balance<DM>(&self, live: &mut ExecutedBlock, address: &Address, amount: &U256, reason: deepmind::BalanceChangeReason, dm_tracer: &mut DM) -> Result<(), Error> where DM: deepmind::Tracer {
+		live.state_mut().add_balance(address, amount, CleanupMode::NoEmpty, reason, dm_tracer).map_err(Into::into)
 	}
 }
 
