@@ -269,7 +269,7 @@ impl<'a, T: 'a, V: 'a, B: 'a, DM: 'a> Ext<DM> for Externalities<'a, T, V, B, DM>
 		};
 
 		if !self.static_flag {
-			if let Err(e) = self.state.inc_nonce(&self.origin_info.address) {
+			if let Err(e) = self.state.inc_nonce(&self.origin_info.address, dm_tracer) {
 				warn!(target: "ext", "Database corruption encountered: {:?}", e);
 				return Ok(ContractCreateResult::Failed)
 			}

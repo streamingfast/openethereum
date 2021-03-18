@@ -46,17 +46,19 @@ fn build_state() -> State<StateDB> {
 }
 
 fn setup_state_for_block(state: &mut State<StateDB>, block: Unverified) -> Vec<SignedTransaction> {
+	let dm_ignored = deepmind::BalanceChangeReason::Ignored;
+
 	block.transactions
 		.into_iter()
 		.map(|tx| tx.verify_unordered().expect("tx is from known-good block"))
 		.inspect(|tx| {
 			// Ensure we have enough cash to execute the transaction
 			let gas_cost = tx.gas * tx.gas_price;
-			state.add_balance(&tx.sender(), &(tx.value + gas_cost), CleanupMode::ForceCreate).unwrap();
+			state.add_balance(&tx.sender(), &(tx.value + gas_cost), CleanupMode::ForceCreate, dm_ignored, deepmind::NoopTracer).unwrap();
 			// Fix up the nonce such that the state has the expected nonce
 			if state.nonce(&tx.sender()).unwrap() == U256::zero() {
 				for _ in 0..tx.nonce.as_usize() {
-					state.inc_nonce(&tx.sender()).unwrap();
+					state.inc_nonce(&tx.sender(), deepmind::NoopTracer).unwrap();
 				}
 			}
 		})

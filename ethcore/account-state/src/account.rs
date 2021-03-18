@@ -488,8 +488,17 @@ impl Account {
 	pub fn storage_changes(&self) -> &HashMap<H256, H256> { &self.storage_changes }
 
 	/// Increment the nonce of the account by one.
-	pub fn inc_nonce(&mut self) {
+	pub fn inc_nonce<DM>(&mut self, address: &Address, dm_tracer: &mut DM)  where DM: deepmind::Tracer {
+		let mut old_nonce: Option<U256> = None;
+		if dm_tracer.is_enabled() {
+			old_nonce = Some(self.nonce);
+		}
+
 		self.nonce = self.nonce.saturating_add(U256::from(1u8));
+
+		if dm_tracer.is_enabled() {
+			dm_tracer.record_nonce_change(address, &old_nonce.unwrap(), &self.nonce);
+		}
 	}
 
 	/// Increase account balance.

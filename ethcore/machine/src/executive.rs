@@ -948,7 +948,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 
 		let mut substate = Substate::new();
 
-		self.state.inc_nonce(&sender)?;
+		self.state.inc_nonce(&sender, &mut dm_tracer)?;
 
 		self.state.sub_balance(
 			&sender,

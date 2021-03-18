@@ -400,8 +400,12 @@ impl<B: Backend> State<B> {
 		}
 		self.insert_cache(contract, AccountEntry::new_dirty(Some(Account::new_contract(balance, nonce, version, original_storage_root))));
 
-		if dm_tracer.is_enabled() && !balance.is_zero() {
-			dm_tracer.record_balance_change(contract, &U256::from(0), &balance, reason);
+		if dm_tracer.is_enabled()  {
+			dm_tracer.record_nonce_change(contract, &U256::from(0), &nonce);
+
+			if !balance.is_zero() {
+				dm_tracer.record_balance_change(contract, &U256::from(0), &balance, reason);
+			}
 		}
 
 		Ok(())
@@ -676,8 +680,8 @@ impl<B: Backend> State<B> {
 	}
 
 	/// Increment the nonce of account `a` by 1.
-	pub fn inc_nonce(&mut self, a: &Address) -> TrieResult<()> {
-		self.require(a, false).map(|mut x| x.inc_nonce())
+	pub fn inc_nonce<DM>(&mut self, a: &Address, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
+		self.require(a, false).map(|mut x| x.inc_nonce(a, dm_tracer))
 	}
 
 	/// Mutate storage of account `a` so that it is `value` for `key`.

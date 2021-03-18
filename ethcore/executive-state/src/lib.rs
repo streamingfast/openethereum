@@ -355,12 +355,12 @@ mod tests {
 		let mut state = {
 			let mut state = get_temp_state();
 			assert_eq!(state.exists(&a).unwrap(), false);
-			state.inc_nonce(&a).unwrap();
+			state.inc_nonce(&a, deepmind::NoopTracer).unwrap();
 			state.commit().unwrap();
 			state.clone()
 		};
 
-		state.inc_nonce(&a).unwrap();
+		state.inc_nonce(&a, deepmind::NoopTracer).unwrap();
 		state.commit().unwrap();
 	}
 
@@ -1169,7 +1169,7 @@ mod tests {
 		let a = Address::zero();
 		let (root, db) = {
 			let mut state = get_temp_state();
-			state.inc_nonce(&a).unwrap();
+			state.inc_nonce(&a, deepmind::NoopTracer).unwrap();
 			state.add_balance(&a, &U256::from(69u64), CleanupMode::NoEmpty).unwrap();
 			state.commit().unwrap();
 			assert_eq!(state.balance(&a).unwrap(), U256::from(69u64));
@@ -1187,7 +1187,7 @@ mod tests {
 		let mut state = get_temp_state();
 		assert_eq!(state.exists(&a).unwrap(), false);
 		assert_eq!(state.exists_and_not_null(&a).unwrap(), false);
-		state.inc_nonce(&a).unwrap();
+		state.inc_nonce(&a, deepmind::NoopTracer).unwrap();
 		assert_eq!(state.exists(&a).unwrap(), true);
 		assert_eq!(state.exists_and_not_null(&a).unwrap(), true);
 		assert_eq!(state.nonce(&a).unwrap(), U256::from(1u64));
@@ -1236,7 +1236,7 @@ mod tests {
 		let a = Address::zero();
 		let (root, db) = {
 			let mut state = get_temp_state();
-			state.inc_nonce(&a).unwrap();
+			state.inc_nonce(&a, deepmind::NoopTracer).unwrap();
 			state.commit().unwrap();
 			assert_eq!(state.exists(&a).unwrap(), true);
 			assert_eq!(state.nonce(&a).unwrap(), U256::from(1u64));
@@ -1286,13 +1286,13 @@ mod tests {
 	fn alter_nonce() {
 		let mut state = get_temp_state();
 		let a = Address::zero();
-		state.inc_nonce(&a).unwrap();
+		state.inc_nonce(&a, deepmind::NoopTracer).unwrap();
 		assert_eq!(state.nonce(&a).unwrap(), U256::from(1u64));
-		state.inc_nonce(&a).unwrap();
+		state.inc_nonce(&a, deepmind::NoopTracer).unwrap();
 		assert_eq!(state.nonce(&a).unwrap(), U256::from(2u64));
 		state.commit().unwrap();
 		assert_eq!(state.nonce(&a).unwrap(), U256::from(2u64));
-		state.inc_nonce(&a).unwrap();
+		state.inc_nonce(&a, deepmind::NoopTracer).unwrap();
 		assert_eq!(state.nonce(&a).unwrap(), U256::from(3u64));
 		state.commit().unwrap();
 		assert_eq!(state.nonce(&a).unwrap(), U256::from(3u64));

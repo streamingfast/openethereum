@@ -1,6 +1,8 @@
 use std::{fmt, sync::Arc};
 use rustc_hex::ToHex;
+use ethereum_types as eth;
 
+static EMPTY_BYTES: [u8; 0] = [];
 #[derive(Debug, PartialEq, Clone)]
 pub struct Config {
     pub enabled: bool,
@@ -58,17 +60,26 @@ impl Printer for IoPrinter {
 pub trait Tracer: Send {
     fn is_enabled(&self) -> bool { false }
     fn start_call(&mut self, _call: Call) {}
-    fn reverted_call(&self, _gas_left: &ethereum_types::U256) {}
-    fn failed_call(&mut self, _gas_left: &ethereum_types::U256, _gas_left_after_failure: &ethereum_types::U256, _err: &String) {}
-    fn end_call(&mut self, _gas_left: &ethereum_types::U256, _return_data: &[u8]) {}
+    fn reverted_call(&self, _gas_left: &eth::U256) {}
+    fn failed_call(&mut self, _gas_left: &eth::U256, _gas_left_after_failure: &eth::U256, _err: &String) {}
+    fn end_call(&mut self, _gas_left: &eth::U256, _return_data: &[u8]) {}
     fn end_failed_call(&mut self) {}
 
-    fn record_balance_change(&mut self,
-        _address: &ethereum_types::Address,
-        _old: &ethereum_types::U256,
-        _new: &ethereum_types::U256,
-        _reason: BalanceChangeReason,
-    ) {}
+    fn record_balance_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256, _reason: BalanceChangeReason) {}
+    fn record_nonce_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256) {}
+    fn record_keccak(&mut self, _hash_of_data: &eth::H256, _data: &[u8]) {}
+    fn record_call_without_code(&mut self) {}
+    fn record_gas_refund(&mut self, _gas_old: u64, _gas_refund: u64) {}
+    fn record_gas_consume(&mut self, _gas_old: u64, _gas_consumed: u64, _reason: GasChangeReason) {}
+    fn record_storage_change(&mut self, _addr: &eth::Address, _key: &eth::H256, _old_data: &eth::H256, _new_data: &eth::H256) {}
+    fn record_suicide(&mut self, _addr: &eth::Address, _suicided: bool, _balance_before_suicide: &eth::U256) {}
+    fn record_new_account(&mut self, _addr: &eth::Address) {}
+    fn record_code_change(&mut self, _addr: &eth::Address, _input_hash: &eth::H256, _code_hash: &eth::H256, _old_code: &[u8], _new_code: &[u8]) {}
+    fn record_before_call_gas_event(&mut self, _gas_value: u64) {}
+    fn record_after_call_gas_event(&mut self, _gas_value: u64) {}
+
+    // fn record_log(&mut self, log: *types.Log) {}
+    // fn record_trx_pool(&mut self, event_type: string, tx *types.Transaction, err error) {}
 }
 
 pub struct NoopTracer;
@@ -77,7 +88,7 @@ impl Tracer for NoopTracer {
 }
 
 /// BlockTracer is responsible of recording single tracing elements (like Balance or Gas change)
-/// that happens outside of any transactions on a block. 
+/// that happens outside of any transactions on a block.
 pub struct BlockTracer {
     printer: Arc<Box<dyn Printer>>,
 }
@@ -88,9 +99,9 @@ impl Tracer for BlockTracer {
     }
 
     fn record_balance_change(&mut self,
-        address: &ethereum_types::Address,
-        old: &ethereum_types::U256,
-        new: &ethereum_types::U256,
+        address: &eth::Address,
+        old: &eth::U256,
+        new: &eth::U256,
         reason: BalanceChangeReason,
     ) {
         record_balance_change(&self.printer, 0, address, old, new, reason)
@@ -104,7 +115,7 @@ pub struct TransactionTracer {
     printer: Arc<Box<dyn Printer>>,
     call_index: u64,
     call_stack: Vec<u64>,
-    gas_left_after_latest_failure: Option<ethereum_types::U256>,
+    gas_left_after_latest_failure: Option<eth::U256>,
 }
 
 impl Tracer for TransactionTracer {
@@ -121,28 +132,18 @@ impl Tracer for TransactionTracer {
             call_index = self.call_index,
         ).as_ref());
 
-        let mut value = ".".to_owned();
-        if let Some(ref amount) = call.value {
-            value = format!("{:x}", U256(amount));
-        }
-
-        let mut input = ".".to_owned();
-        if let Some(bytes) = call.input {
-            input = format!("{:x}", Hex(bytes));
-        }
-
-        self.printer.print(format!("EVM_PARAM {call_type} {call_index} {from:x} {to:x} {value} {gas_limit} {input}",
+        self.printer.print(format!("EVM_PARAM {call_type} {call_index} {from:x} {to:x} {value:x} {gas_limit} {input:x}",
             call_type = call.call_type,
             call_index = self.call_index,
             from = Address(&call.from),
             to = Address(&call.to),
-            value = value,
+            value = U256(&call.value.unwrap_or_else(|| eth::U256::from(0))),
             gas_limit = call.gas_limit,
-            input = input,
+            input = Hex(call.input.unwrap_or(&EMPTY_BYTES)),
         ).as_ref());
     }
 
-    fn reverted_call(&self, gas_left: &ethereum_types::U256) {
+    fn reverted_call(&self, gas_left: &eth::U256) {
         self.printer.print(format!("EVM_CALL_FAILED {call_index} {gas_left} {reason}",
             call_index = self.active_call_index(),
             gas_left = gas_left.as_u64(),
@@ -154,7 +155,7 @@ impl Tracer for TransactionTracer {
         ).as_ref());
     }
 
-    fn failed_call(&mut self, gas_left: &ethereum_types::U256, gas_left_after_failure: &ethereum_types::U256, err: &String) {
+    fn failed_call(&mut self, gas_left: &eth::U256, gas_left_after_failure: &eth::U256, err: &String) {
         if self.gas_left_after_latest_failure.is_some() {
             panic!("There is already a gas_left_after_latest_failure value set at this point that should have been consumed already")
         }
@@ -168,22 +169,16 @@ impl Tracer for TransactionTracer {
         self.gas_left_after_latest_failure = Some(*gas_left_after_failure);
     }
 
-    fn end_call(&mut self, gas_left: &ethereum_types::U256, return_data: &[u8]) {
+    fn end_call(&mut self, gas_left: &eth::U256, return_data: &[u8]) {
        let call_index = match self.call_stack.pop() {
            Some(index) => index,
            None => panic!("There should always be a call in our call index stack")
        };
 
-        let bytes: &[u8]= return_data;
-        let mut return_value = ".".to_owned();
-        if bytes.len() > 0 {
-            return_value = format!("{:x}", Hex(bytes));
-        }
-
-        self.printer.print(format!("EVM_END_CALL {call_index} {gas_left:} {return_value}",
+        self.printer.print(format!("EVM_END_CALL {call_index} {gas_left:} {return_value:x}",
             call_index = call_index,
             gas_left = gas_left.as_u64(),
-            return_value = return_value,
+            return_value = Hex(return_data),
         ).as_ref());
     }
 
@@ -198,13 +193,117 @@ impl Tracer for TransactionTracer {
         self.end_call(&gas_left, &[])
     }
 
-    fn record_balance_change(&mut self,
-        address: &ethereum_types::Address,
-        old: &ethereum_types::U256,
-        new: &ethereum_types::U256,
-        reason: BalanceChangeReason,
-    ) {
+    fn record_balance_change(&mut self, address: &eth::Address, old: &eth::U256, new: &eth::U256, reason: BalanceChangeReason) {
         record_balance_change(&self.printer, self.active_call_index() as u64, address, old, new, reason)
+    }
+
+    fn record_nonce_change(&mut self, address: &eth::Address, old: &eth::U256, new: &eth::U256) {
+        self.printer.print(format!("NONCE_CHANGE {call_index} {address:x} {old_nonce} {new_nonce}",
+            call_index = self.active_call_index(),
+            address = Address(address),
+            old_nonce = old.as_u64(),
+            new_nonce = new.as_u64(),
+        ).as_ref());
+    }
+
+    fn record_keccak(&mut self, hash_of_data: &eth::H256, data: &[u8]) {
+        self.printer.print(format!("EVM_KECCAK, {call_index} {hash_of_data:x} {data:x}",
+            call_index = self.active_call_index(),
+            hash_of_data = H256(hash_of_data),
+            data = Hex(data),
+        ).as_ref());
+    }
+
+    fn record_call_without_code(&mut self) {
+        self.printer.print(format!("ACCOUNT_WITHOUT_CODE, {call_index}",
+            call_index = self.active_call_index(),
+        ).as_ref());
+    }
+
+    fn record_gas_consume(&mut self, gas_old: u64, gas_consumed: u64, reason: GasChangeReason) {
+        if gas_consumed != 0 {
+            record_gas_change(&self.printer, self.active_call_index(), gas_old, gas_consumed-gas_consumed, reason);
+        }
+    }
+
+    fn record_gas_refund(&mut self, gas_old: u64, gas_refund: u64) {
+        if gas_refund != 0 {
+            record_gas_change(&self.printer, self.active_call_index(), gas_old, gas_old+gas_refund, GasChangeReason::RefundAfterExecution);
+        }
+    }
+
+    fn record_storage_change(&mut self, address: &eth::Address, key: &eth::H256, old_data: &eth::H256, new_data: &eth::H256) {
+        self.printer.print(format!("STORAGE_CHANGE, {call_index} {address:x} {key:x} {old_data:x} {new_data:x}",
+            call_index = self.active_call_index(),
+            address = Address(address),
+            key = H256(key),
+            old_data = H256(old_data),
+            new_data = H256(new_data),
+        ).as_ref());
+    }
+
+    fn record_suicide(&mut self, address: &eth::Address, suicided: bool, balance_before_suicide: &eth::U256) {
+        self.printer.print(format!("SUICIDE_CHANGE, {call_index} {address:x} {suicided} {balance_before_suicide:x}",
+            call_index = self.active_call_index(),
+            address = Address(address),
+            suicided = suicided,
+            balance_before_suicide = U256(balance_before_suicide),
+        ).as_ref());
+
+        // Matt: I don't think this is required by OpenEthereum since handle differently, needs to be validated
+        // if balanceBeforeSuicide.Sign() != 0 {
+        // 	// We need to explicit add a balance change removing the suicided contract balance since
+        // 	// the remaining balance of the contract has already been resetted to 0 by the time we
+        // 	// do the print call.
+        // 	ctx.RecordBalanceChange(addr, balanceBeforeSuicide, common.Big0, BalanceChangeReason("suicide_withdraw"))
+        // }
+    }
+
+    fn record_new_account(&mut self, address: &eth::Address) {
+        self.printer.print(format!("CREATED_ACCOUNT, {call_index} {address:x}",
+            call_index = self.active_call_index(),
+            address = Address(address),
+        ).as_ref());
+    }
+
+    fn record_code_change(&mut self, address: &eth::Address, input_hash: &eth::H256, code_hash: &eth::H256, old_code: &[u8], new_code: &[u8]) {
+        self.printer.print(format!("CODE_CHANGE, {call_index} {address:x} {input_hash:x} {old_code:x} {code_hash:x} {new_code:x}",
+            // Follows Geth order, yes it's not aligned with the record_code_change signature, but we must respect console reader order here
+            call_index = self.active_call_index(),
+            address = Address(address),
+            input_hash = H256(input_hash),
+            old_code = Hex(old_code),
+            code_hash = H256(code_hash),
+            new_code = Hex(new_code),
+        ).as_ref());
+    }
+
+    fn record_before_call_gas_event(&mut self, gas_value: u64) {
+        // // The `ctx.nextCallIndex` has not been incremented yet, so we add +1 for the linked call index
+        // ctx.printer.Print("GAS_EVENT", ctx.callIndex(), Uint64(ctx.nextCallIndex+1), "before_call", Uint64(gasValue))
+        let call_index = self.active_call_index();
+
+        // Matt: Validate against Geth logic, see commented code at top of this implementation
+        self.printer.print(format!("GAS_EVENT, {call_index} {for_call_index} {reason} {gas_value}",
+            call_index = call_index,
+            for_call_index = call_index + 1,
+            reason = "before_call",
+            gas_value = gas_value,
+        ).as_ref());
+    }
+
+    fn record_after_call_gas_event(&mut self, gas_value: u64) {
+        // // The `ctx.nextCallIndex` is already pointing to previous call index, so we simply use it for the linked call index
+	    // ctx.printer.Print("GAS_EVENT", ctx.callIndex(), Uint64(ctx.nextCallIndex), "after_call", Uint64(gasValue))
+        let call_index = self.active_call_index();
+
+        // Matt: Validate against Geth logic, see commented code at top of this implementation
+        self.printer.print(format!("GAS_EVENT, {call_index} {for_call_index} {reason} {gas_value}",
+            call_index = call_index,
+            for_call_index = call_index,
+            reason = "before_call",
+            gas_value = gas_value,
+        ).as_ref());
     }
 }
 
@@ -226,9 +325,9 @@ impl TransactionTracer {
 fn record_balance_change(
     printer: &Box<dyn Printer>,
     call_index: u64,
-    address: &ethereum_types::Address,
-    old: &ethereum_types::U256,
-    new: &ethereum_types::U256,
+    address: &eth::Address,
+    old: &eth::U256,
+    new: &eth::U256,
     reason: BalanceChangeReason,
 ) {
     if reason != BalanceChangeReason::Ignored {
@@ -237,6 +336,24 @@ fn record_balance_change(
             address = Address(address),
             old_balance = U256(old),
             new_balance = U256(new),
+            reason = reason,
+        ).as_ref())
+    }
+}
+
+#[inline]
+fn record_gas_change(
+    printer: &Box<dyn Printer>,
+    call_index: u64,
+    old: u64,
+    new: u64,
+    reason: GasChangeReason,
+) {
+    if reason != GasChangeReason::Ignored {
+        printer.print(format!("GAS_CHANGE {call_index} {old_gas} {new_gas} {reason}",
+            call_index = call_index,
+            old_gas = old,
+            new_gas = new,
             reason = reason,
         ).as_ref())
     }
@@ -284,6 +401,67 @@ impl fmt::Display for BalanceChangeReason {
             // Those that should actually results in panics
             BalanceChangeReason::CallBalanceOverride => panic!("A CallBalanceOverride balance change reason should never be used"),
             BalanceChangeReason::Ignored => panic!("A Ignored balance change reason should never be displayed")
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum GasChangeReason {
+    Unknown,
+    Call,
+    CallCode,
+    CallDataCopy,
+    CodeCopy,
+    CodeStorage,
+    ContractCreation,
+    ContractCreation2,
+    DelegateCall,
+    EventLog,
+    ExtCodeCopy,
+    FailedExecution,
+    IntrinsicGas,
+    PrecompiledContract,
+    RefundAfterExecution,
+    Return,
+    ReturnDataCopy,
+    Revert,
+    SelfDestruct,
+    StaticCall,
+
+    // Added in Berlin fork (Geth 1.10+)
+    StateColdAccess,
+
+    // Special enum that should be ignored when writing, should never be displayed
+    Ignored,
+}
+
+impl fmt::Display for GasChangeReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The output must match exact names found in `proto-ethereum/dfuse/ethereum/codec/v1/codec.proto#GasChange.Reason` enum, which is also respected by Geth
+        f.write_str(match self {
+            GasChangeReason::Unknown => "unknown",
+            GasChangeReason::Call => "call",
+            GasChangeReason::CallCode => "call_code",
+            GasChangeReason::CallDataCopy => "call_data_copy",
+            GasChangeReason::CodeCopy => "code_copy",
+            GasChangeReason::CodeStorage => "code_storage",
+            GasChangeReason::ContractCreation => "contract_creation",
+            GasChangeReason::ContractCreation2 => "contract_creation2",
+            GasChangeReason::DelegateCall => "delegate_call",
+            GasChangeReason::EventLog => "event_log",
+            GasChangeReason::ExtCodeCopy => "ext_code_copy",
+            GasChangeReason::FailedExecution => "failed_execution",
+            GasChangeReason::IntrinsicGas => "intrinsic_gas",
+            GasChangeReason::PrecompiledContract => "precompiled_contract",
+            GasChangeReason::RefundAfterExecution => "refund_after_execution",
+            GasChangeReason::Return => "return",
+            GasChangeReason::ReturnDataCopy => "return_data_copy",
+            GasChangeReason::Revert => "revert",
+            GasChangeReason::SelfDestruct => "self_destruct",
+            GasChangeReason::StaticCall => "static_call",
+            GasChangeReason::StateColdAccess => "state_cold_access",
+
+            GasChangeReason::Ignored => panic!("A Ignored gas change reason should never be displayed")
         })
     }
 }
@@ -376,7 +554,7 @@ impl Context {
     }
 }
 
-struct Address<'a>(&'a ethereum_types::Address);
+struct Address<'a>(&'a eth::Address);
 
 impl fmt::LowerHex for Address<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -412,23 +590,23 @@ impl fmt::Display for CallType {
 
 pub struct Call<'a> {
     pub call_type: CallType,
-    pub from: ethereum_types::Address,
-    pub to: ethereum_types::Address,
-    pub value: Option<ethereum_types::U256>,
+    pub from: eth::Address,
+    pub to: eth::Address,
+    pub value: Option<eth::U256>,
     pub gas_limit: u64,
     pub input: Option<&'a [u8]>,
 }
 
 pub struct Transaction<'a> {
-    pub hash: ethereum_types::H256,
-    pub from: ethereum_types::Address,
-    pub to: Option<ethereum_types::Address>,
-    pub value: ethereum_types::U256,
+    pub hash: eth::H256,
+    pub from: eth::Address,
+    pub to: Option<eth::Address>,
+    pub value: eth::U256,
     pub gas_limit: u64,
-    pub gas_price: ethereum_types::U256,
+    pub gas_price: eth::U256,
     pub nonce: u64,
     pub data: &'a [u8],
-    pub signature: (u64, ethereum_types::H256, ethereum_types::H256),
+    pub signature: (u64, eth::H256, eth::H256),
 }
 
 struct Hex<'a>(&'a [u8]);
@@ -443,7 +621,7 @@ impl fmt::LowerHex for Hex<'_> {
     }
 }
 
-struct H256<'a>(&'a ethereum_types::H256);
+struct H256<'a>(&'a eth::H256);
 
 impl fmt::LowerHex for H256<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -455,7 +633,7 @@ impl fmt::LowerHex for H256<'_> {
     }
 }
 
-struct U256<'a>(&'a ethereum_types::U256);
+struct U256<'a>(&'a eth::U256);
 
 impl fmt::LowerHex for U256<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
