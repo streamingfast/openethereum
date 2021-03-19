@@ -136,7 +136,7 @@ impl Ext<deepmind::NoopTracer> for FakeExt {
 		Ok(self.store.get(key).unwrap_or(&H256::zero()).clone())
 	}
 
-	fn set_storage(&mut self, key: H256, value: H256) -> Result<()> {
+	fn set_storage(&mut self, key: H256, value: H256, _dm_tracer: &mut deepmind::NoopTracer) -> Result<()> {
 		self.store.insert(key, value);
 		Ok(())
 	}
@@ -223,7 +223,7 @@ impl Ext<deepmind::NoopTracer> for FakeExt {
 		Ok(self.codes.get(address).map(|c| keccak(c.as_ref())))
 	}
 
-	fn log(&mut self, topics: Vec<H256>, data: &[u8]) -> Result<()> {
+	fn log(&mut self, topics: Vec<H256>, data: &[u8], _dm_tracer: &mut deepmind::NoopTracer) -> Result<()> {
 		self.logs.push(FakeLogEntry {
 			topics,
 			data: data.to_vec()
@@ -231,7 +231,7 @@ impl Ext<deepmind::NoopTracer> for FakeExt {
 		Ok(())
 	}
 
-	fn ret(self, _gas: &U256, _data: &ReturnData, _apply_state: bool) -> Result<U256> {
+	fn ret(self, _gas: &U256, _data: &ReturnData, _apply_state: bool, _dm_tracer: &mut deepmind::NoopTracer) -> Result<U256> {
 		unimplemented!();
 	}
 

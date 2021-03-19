@@ -286,7 +286,7 @@ impl<'a, DM> Runtime<'a, DM> where DM: deepmind::Tracer {
 			self.adjusted_charge(|schedule| schedule.sstore_reset_gas as u64)?;
 		}
 
-		self.ext.set_storage(key, val).map_err(|_| Error::StorageUpdateError)?;
+		self.ext.set_storage(key, val, self.dm_tracer).map_err(|_| Error::StorageUpdateError)?;
 
 		if former_val != H256::zero() && val == H256::zero() {
 			let sstore_clears_schedule = self.schedule().sstore_refund_gas;
@@ -743,7 +743,7 @@ impl<'a, DM> Runtime<'a, DM> where DM: deepmind::Tracer {
 				.expect("topics is resized to `topic_count`, i is in 0..topic count iterator, get_mut uses i as an indexer, get_mut cannot fail; qed")
 				= H256::from_slice(&self.memory.get(offset, 32)?[..]);
 		}
-		self.ext.log(topics, &self.memory.get(data_ptr, data_len as usize)?).map_err(|_| Error::Log)?;
+		self.ext.log(topics, &self.memory.get(data_ptr, data_len as usize)?, self.dm_tracer).map_err(|_| Error::Log)?;
 
 		Ok(())
 	}

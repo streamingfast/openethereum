@@ -38,11 +38,11 @@ pub struct FinalizationResult {
 /// `Reult<GasLeft<'a>>`.
 pub trait Finalize<DM> where DM: deepmind::Tracer {
 	/// Consume the externalities, call return if necessary, and produce call result.
-	fn finalize<E: Ext<DM>>(self, ext: E) -> Result<FinalizationResult>;
+	fn finalize<E: Ext<DM>>(self, ext: E, dm_tracer: &mut DM) -> Result<FinalizationResult>;
 }
 
 impl<DM> Finalize<DM> for Result<GasLeft> where DM: deepmind::Tracer {
-	fn finalize<E: Ext<DM>>(self, ext: E) -> Result<FinalizationResult> {
+	fn finalize<E: Ext<DM>>(self, ext: E, dm_tracer: &mut DM) -> Result<FinalizationResult> {
 		match self {
 			Ok(GasLeft::Known(gas_left)) => {
 				Ok(FinalizationResult {
@@ -52,7 +52,7 @@ impl<DM> Finalize<DM> for Result<GasLeft> where DM: deepmind::Tracer {
 				})
 			},
 			Ok(GasLeft::NeedsReturn { gas_left, data, apply_state }) => {
-				ext.ret(&gas_left, &data, apply_state).map(|gas_left|
+				ext.ret(&gas_left, &data, apply_state, dm_tracer).map(|gas_left|
 					FinalizationResult { gas_left, apply_state, return_data: data }
 				)
 			},
@@ -62,7 +62,7 @@ impl<DM> Finalize<DM> for Result<GasLeft> where DM: deepmind::Tracer {
 }
 
 impl<DM> Finalize<DM> for Error where DM: deepmind::Tracer {
-	fn finalize<E: Ext<DM>>(self, _ext: E) -> Result<FinalizationResult> {
+	fn finalize<E: Ext<DM>>(self, _ext: E, _dm_tracer: &mut DM) -> Result<FinalizationResult> {
 		Err(self)
 	}
 }

@@ -701,7 +701,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 					.iter()
 					.map(BigEndianHash::from_uint)
 					.collect();
-				ext.log(topics, self.mem.read_slice(offset, size))?;
+				ext.log(topics, self.mem.read_slice(offset, size), dm_tracer)?;
 			},
 			instructions::PUSH1 | instructions::PUSH2 | instructions::PUSH3 | instructions::PUSH4 |
 			instructions::PUSH5 | instructions::PUSH6 | instructions::PUSH7 | instructions::PUSH8 |
@@ -763,7 +763,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 						ext.add_sstore_refund(sstore_clears_schedule);
 					}
 				}
-				ext.set_storage(address, BigEndianHash::from_uint(&val))?;
+				ext.set_storage(address, BigEndianHash::from_uint(&val), dm_tracer)?;
 			},
 			instructions::PC => {
 				self.stack.push(U256::from(self.reader.position - 1));

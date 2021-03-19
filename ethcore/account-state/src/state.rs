@@ -350,7 +350,7 @@ impl<B: Backend> State<B> {
 		}
 	}
 
-	fn insert_cache(&self, address: &Address, account: AccountEntry) {
+	fn insert_cache<DM>(&self, address: &Address, account: AccountEntry, dm_tracer: &mut DM) where DM: deepmind::Tracer {
 		// Dirty account which is not in the cache means this is a new account.
 		// It goes directly into the checkpoint as there's nothing to revert to.
 		//
@@ -360,7 +360,15 @@ impl<B: Backend> State<B> {
 		let old_value = self.cache.borrow_mut().insert(*address, account);
 		if is_dirty {
 			if let Some(ref mut checkpoint) = self.checkpoints.borrow_mut().last_mut() {
-				checkpoint.entry(*address).or_insert(old_value);
+				let entry = checkpoint.entry(*address);
+				if dm_tracer.is_enabled() {
+					match entry {
+						Entry::Vacant(..) => dm_tracer.record_new_account(address),
+						_ => {}
+					}
+				}
+
+				entry.or_insert(old_value);
 			}
 		}
 	}
@@ -379,9 +387,9 @@ impl<B: Backend> State<B> {
 	}
 
 	/// Destroy the current object and return single account data.
-	pub fn into_account(self, account: &Address) -> TrieResult<(Option<Arc<Bytes>>, HashMap<H256, H256>)> {
+	pub fn into_account<DM>(self, account: &Address, dm_tracer: &mut DM) -> TrieResult<(Option<Arc<Bytes>>, HashMap<H256, H256>)> where DM: deepmind::Tracer  {
 		// TODO: deconstruct without cloning.
-		let account = self.require(account, true)?;
+		let account = self.require(account, true, dm_tracer)?;
 		Ok((account.code().clone(), account.storage_changes().clone()))
 	}
 
@@ -398,7 +406,7 @@ impl<B: Backend> State<B> {
 		if overflow {
 			return Err(Box::new(TrieError::DecoderError(H256::from(*contract), rlp::DecoderError::Custom("Nonce overflow".into()))));
 		}
-		self.insert_cache(contract, AccountEntry::new_dirty(Some(Account::new_contract(balance, nonce, version, original_storage_root))));
+		self.insert_cache(contract, AccountEntry::new_dirty(Some(Account::new_contract(balance, nonce, version, original_storage_root))), dm_tracer);
 
 		if dm_tracer.is_enabled()  {
 			dm_tracer.record_nonce_change(contract, &U256::from(0), &nonce);
@@ -412,8 +420,8 @@ impl<B: Backend> State<B> {
 	}
 
 	/// Remove an existing account.
-	pub fn kill_account(&mut self, account: &Address) {
-		self.insert_cache(account, AccountEntry::new_dirty(None));
+	pub fn kill_account<DM>(&mut self, account: &Address, dm_tracer: &mut DM) where DM: deepmind::Tracer  {
+		self.insert_cache(account, AccountEntry::new_dirty(None), dm_tracer);
 	}
 
 	/// Determine whether an account exists.
@@ -538,7 +546,7 @@ impl<B: Backend> State<B> {
 	}
 
 	fn storage_at_inner<FCachedStorageAt, FStorageAt>(
-		&self, address: &Address, key: &H256, f_cached_at: FCachedStorageAt, f_at: FStorageAt,
+		&self, address: &Address, key: &H256, f_cached_at: FCachedStorageAt, f_at: FStorageAt
 	) -> TrieResult<H256> where
 		FCachedStorageAt: Fn(&Account, &H256) -> Option<H256>,
 		FStorageAt: Fn(&Account, &dyn HashDB<KeccakHasher, DBValue>, &H256) -> TrieResult<H256>
@@ -597,7 +605,7 @@ impl<B: Backend> State<B> {
 			let account_db = self.factories.accountdb.readonly(self.db.as_hash_db(), a.address_hash(address));
 			f_at(a, account_db.as_hash_db(), key)
 		});
-		self.insert_cache(address, AccountEntry::new_clean(maybe_acc));
+		self.insert_cache(address, AccountEntry::new_clean(maybe_acc), &mut deepmind::NoopTracer);
 		r
 	}
 
@@ -650,11 +658,11 @@ impl<B: Backend> State<B> {
 		trace!(target: "state", "add_balance({}, {}): {}", a, incr, self.balance(a)?);
 		let is_value_transfer = !incr.is_zero();
 		if is_value_transfer || (cleanup_mode == CleanupMode::ForceCreate && !self.exists(a)?) {
-			self.require(a, false)?.add_balance(incr, reason, a, dm_tracer);
+			self.require(a, false, dm_tracer)?.add_balance(incr, reason, a, dm_tracer);
 		} else if let CleanupMode::TrackTouched(set) = cleanup_mode {
 			if self.exists(a)? {
 				set.insert(*a);
-				self.touch(a)?;
+				self.touch(a, dm_tracer)?;
 			}
 		}
 		Ok(())
@@ -664,7 +672,7 @@ impl<B: Backend> State<B> {
 	pub fn sub_balance<DM>(&mut self, a: &Address, decr: &U256, cleanup_mode: &mut CleanupMode, reason: deepmind::BalanceChangeReason, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
 		trace!(target: "state", "sub_balance({}, {}): {}", a, decr, self.balance(a)?);
 		if !decr.is_zero() || !self.exists(a)? {
-			self.require(a, false)?.sub_balance(decr, reason, a, dm_tracer);
+			self.require(a, false, dm_tracer)?.sub_balance(decr, reason, a, dm_tracer);
 		}
 		if let CleanupMode::TrackTouched(ref mut set) = *cleanup_mode {
 			set.insert(*a);
@@ -681,14 +689,14 @@ impl<B: Backend> State<B> {
 
 	/// Increment the nonce of account `a` by 1.
 	pub fn inc_nonce<DM>(&mut self, a: &Address, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
-		self.require(a, false).map(|mut x| x.inc_nonce(a, dm_tracer))
+		self.require(a, false, dm_tracer).map(|mut x| x.inc_nonce(a, dm_tracer))
 	}
 
 	/// Mutate storage of account `a` so that it is `value` for `key`.
-	pub fn set_storage(&mut self, a: &Address, key: H256, value: H256) -> TrieResult<()> {
+	pub fn set_storage<DM>(&mut self, a: &Address, key: H256, value: H256, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer  {
 		trace!(target: "state", "set_storage({}:{:x} to {:x})", a, key, value);
 		if self.storage_at(a, &key)? != value {
-			self.require(a, false)?.set_storage(key, value)
+			self.require(a, false, dm_tracer)?.set_storage(key, value)
 		}
 
 		Ok(())
@@ -696,19 +704,19 @@ impl<B: Backend> State<B> {
 
 	/// Initialise the code of account `a` so that it is `code`.
 	/// NOTE: Account should have been created with `new_contract`.
-	pub fn init_code(&mut self, a: &Address, code: Bytes) -> TrieResult<()> {
-		self.require_or_from(a, true, || Account::new_contract(0.into(), self.account_start_nonce, 0.into(),KECCAK_NULL_RLP), |_| {})?.init_code(code);
+	pub fn init_code<DM>(&mut self, a: &Address, code: Bytes, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
+		self.require_or_from(a, true, || Account::new_contract(0.into(), self.account_start_nonce, 0.into(),KECCAK_NULL_RLP), |_| {}, dm_tracer)?.init_code(code);
 		Ok(())
 	}
 
 	/// Reset the code of account `a` so that it is `code`.
-	pub fn reset_code(&mut self, a: &Address, code: Bytes) -> TrieResult<()> {
-		self.require_or_from(a, true, || Account::new_contract(0.into(), self.account_start_nonce, 0.into(), KECCAK_NULL_RLP), |_| {})?.reset_code(code);
+	pub fn reset_code<DM>(&mut self, a: &Address, code: Bytes, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
+		self.require_or_from(a, true, || Account::new_contract(0.into(), self.account_start_nonce, 0.into(), KECCAK_NULL_RLP), |_| {}, dm_tracer)?.reset_code(code);
 		Ok(())
 	}
 
-	fn touch(&mut self, a: &Address) -> TrieResult<()> {
-		self.require(a, false)?;
+	fn touch<DM>(&mut self, a: &Address, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
+		self.require(a, false, dm_tracer)?;
 		Ok(())
 	}
 
@@ -762,7 +770,7 @@ impl<B: Backend> State<B> {
 	}
 
 	/// Remove any touched empty or dust accounts.
-	pub fn kill_garbage(&mut self, touched: &HashSet<Address>, min_balance: &Option<U256>, kill_contracts: bool) -> TrieResult<()> {
+	pub fn kill_garbage<DM>(&mut self, touched: &HashSet<Address>, min_balance: &Option<U256>, kill_contracts: bool, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
 		let to_kill: HashSet<_> =
 			touched.iter().filter_map(|address| { // Check all touched accounts
 				self.cache.borrow().get(address).and_then(|entry| {
@@ -776,7 +784,7 @@ impl<B: Backend> State<B> {
 			}).collect();
 
 		for address in to_kill {
-			self.kill_account(address)
+			self.kill_account(address, dm_tracer)
 		}
 		Ok(())
 	}
@@ -819,7 +827,7 @@ impl<B: Backend> State<B> {
 		for item in trie.iter()? {
 			if let Ok((addr, _dbval)) = item {
 				let address = Address::from_slice(&addr);
-				let _ = self.require(&address, true);
+				let _ = self.require(&address, true, &mut deepmind::NoopTracer);
 			}
 		}
 
@@ -1008,32 +1016,32 @@ impl<B: Backend> State<B> {
 					}
 				}
 				let r = f(maybe_acc.as_ref());
-				self.insert_cache(a, AccountEntry::new_clean(maybe_acc));
+				self.insert_cache(a, AccountEntry::new_clean(maybe_acc), &mut deepmind::NoopTracer);
 				Ok(r)
 			}
 		}
 	}
 
 	/// Pull account `a` in our cache from the trie DB. `require_code` requires that the code be cached, too.
-	pub fn require(&self, a: &Address, require_code: bool) -> TrieResult<RefMut<Account>> {
-		self.require_or_from(a, require_code, || Account::new_basic(0u8.into(), self.account_start_nonce), |_| {})
+	pub fn require<DM>(&self, a: &Address, require_code: bool, dm_tracer: &mut DM) -> TrieResult<RefMut<Account>> where DM: deepmind::Tracer {
+		self.require_or_from(a, require_code, || Account::new_basic(0u8.into(), self.account_start_nonce), |_| {}, dm_tracer)
 	}
 
 	/// Pull account `a` in our cache from the trie DB. `require_code` requires that the code be cached, too.
 	/// If it doesn't exist, make account equal the evaluation of `default`.
-	pub fn require_or_from<F, G>(&self, a: &Address, require_code: bool, default: F, not_default: G) -> TrieResult<RefMut<Account>>
-		where F: FnOnce() -> Account, G: FnOnce(&mut Account),
+	pub fn require_or_from<F, G, DM>(&self, a: &Address, require_code: bool, default: F, not_default: G, dm_tracer: &mut DM) -> TrieResult<RefMut<Account>>
+		where F: FnOnce() -> Account, G: FnOnce(&mut Account), DM: deepmind::Tracer
 	{
 		let contains_key = self.cache.borrow().contains_key(a);
 		if !contains_key {
 			match self.db.get_cached_account(a) {
-				Some(acc) => self.insert_cache(a, AccountEntry::new_clean_cached(acc)),
+				Some(acc) => self.insert_cache(a, AccountEntry::new_clean_cached(acc), dm_tracer),
 				None => {
 					let db = &self.db.as_hash_db();
 					let db = self.factories.trie.readonly(db, &self.root)?;
 					let from_rlp = |b:&[u8]| { Account::from_rlp(b).expect("decoding db value failed") };
 					let maybe_account = db.get_with(a.as_bytes(), from_rlp)?;
-					self.insert_cache(a, AccountEntry::new_clean(maybe_account));
+					self.insert_cache(a, AccountEntry::new_clean(maybe_account), dm_tracer);
 				}
 			}
 		}
@@ -1045,7 +1053,13 @@ impl<B: Backend> State<B> {
 
 			match &mut entry.account {
 				&mut Some(ref mut acc) => not_default(acc),
-				slot => *slot = Some(default()),
+				slot => {
+					if dm_tracer.is_enabled() {
+						dm_tracer.record_new_account(a);
+					}
+
+					*slot = Some(default())
+				},
 			}
 
 			// set the dirty flag after changing account data.
@@ -1066,8 +1080,8 @@ impl<B: Backend> State<B> {
 	}
 
 	/// Replace account code and storage. Creates account if it does not exist.
-	pub fn patch_account(&self, a: &Address, code: Arc<Bytes>, storage: HashMap<H256, H256>) -> TrieResult<()> {
-		Ok(self.require(a, false)?.reset_code_and_storage(code, storage))
+	pub fn patch_account<DM>(&self, a: &Address, code: Arc<Bytes>, storage: HashMap<H256, H256>, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
+		Ok(self.require(a, false, dm_tracer)?.reset_code_and_storage(code, storage))
 	}
 }
 

@@ -513,7 +513,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					Some(exec) => {
 						let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, OutputPolicy::Return, tracer, vm_tracer);
 						match exec.exec(&mut ext, dm_tracer) {
-							Ok(val) => Ok(val.finalize(ext)),
+							Ok(val) => Ok(val.finalize(ext, dm_tracer)),
 							Err(err) => Err(err),
 						}
 					},
@@ -564,7 +564,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					Some(exec) => {
 						let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, OutputPolicy::InitContract, tracer, vm_tracer);
 						match exec.exec(&mut ext, dm_tracer) {
-							Ok(val) => Ok(val.finalize(ext)),
+							Ok(val) => Ok(val.finalize(ext, dm_tracer)),
 							Err(err) => Err(err),
 						}
 					},
@@ -601,7 +601,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 
 					let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, if self.is_create { OutputPolicy::InitContract } else { OutputPolicy::Return }, tracer, vm_tracer);
 					match exec.exec(&mut ext, dm_tracer) {
-						Ok(val) => Ok(val.finalize(ext)),
+						Ok(val) => Ok(val.finalize(ext, dm_tracer)),
 						Err(err) => Err(err),
 					}
 				};
@@ -640,7 +640,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 
 					let mut ext = Self::as_externalities(state, self.info, self.machine, self.schedule, self.depth, self.stack_depth, self.static_flag, &origin_info, &mut unconfirmed_substate, if self.is_create { OutputPolicy::InitContract } else { OutputPolicy::Return }, tracer, vm_tracer);
 					match exec.exec(&mut ext, dm_tracer) {
-						Ok(val) => Ok(val.finalize(ext)),
+						Ok(val) => Ok(val.finalize(ext, dm_tracer)),
 						Err(err) => Err(err),
 					}
 				};
@@ -788,11 +788,13 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					}
 				},
 				Some((_, _, Err(TrapError::Call(subparams, resume)))) => {
+					let is_builtin = resume.machine.builtin(&subparams.address, resume.info.number).is_some();
+
 					if dm_tracer.is_enabled() {
 						dm_tracer.start_call(subparams.to_deepmind_call());
 					}
 
-					tracer.prepare_trace_call(&subparams, resume.depth + 1, resume.machine.builtin(&subparams.address, resume.info.number).is_some());
+					tracer.prepare_trace_call(&subparams, resume.depth + 1, is_builtin);
 					vm_tracer.prepare_subtrace(subparams.code.as_ref().map_or_else(|| &[] as &[u8], |d| &*d as &[u8]));
 
 					let sub_exec = CallCreateExecutive::new_call_raw(
@@ -1281,7 +1283,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 
 		// perform suicides
 		for address in &substate.suicides {
-			self.state.kill_account(address);
+			self.state.kill_account(address, dm_tracer);
 		}
 
 		// perform garbage-collection
@@ -1294,7 +1296,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 			} else {
 				(None, false)
 			};
-			self.state.kill_garbage(&substate.touched, &min_balance, kill_contracts)?;
+			self.state.kill_garbage(&substate.touched, &min_balance, kill_contracts, dm_tracer)?;
 		}
 		match result {
 			Err(vm::Error::Internal(msg)) => Err(ExecutionError::Internal(msg)),

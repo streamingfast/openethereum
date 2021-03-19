@@ -1247,7 +1247,7 @@ mod tests {
 			let mut state = State::from_existing(db, root, U256::from(0u8), Default::default()).unwrap();
 			assert_eq!(state.exists(&a).unwrap(), true);
 			assert_eq!(state.nonce(&a).unwrap(), U256::from(1u64));
-			state.kill_account(&a);
+			state.kill_account(&a, &mut deepmind::NoopTracer);
 			state.commit().unwrap();
 			assert_eq!(state.exists(&a).unwrap(), false);
 			assert_eq!(state.nonce(&a).unwrap(), U256::from(0u64));
@@ -1652,14 +1652,14 @@ mod tests {
 
 		let (root, db) = {
 			let mut state = State::new(db, U256::from(0), Default::default());
-			state.set_storage(&a, BigEndianHash::from_uint(&U256::from(1u64)), BigEndianHash::from_uint(&U256::from(20u64))).unwrap();
+			state.set_storage(&a, BigEndianHash::from_uint(&U256::from(1u64)), BigEndianHash::from_uint(&U256::from(20u64)), &mut deepmind::NoopTracer).unwrap();
 			state.commit().unwrap();
 			state.drop()
 		};
 
 		let mut state = State::from_existing(db, root, U256::from(0u8), Default::default()).unwrap();
 		let original = state.clone();
-		state.set_storage(&a, BigEndianHash::from_uint(&U256::from(1u64)), BigEndianHash::from_uint(&U256::from(100u64))).unwrap();
+		state.set_storage(&a, BigEndianHash::from_uint(&U256::from(1u64)), BigEndianHash::from_uint(&U256::from(100u64)), &mut deepmind::NoopTracer).unwrap();
 
 		let diff = state.diff_from(original).unwrap();
 		let diff_map = diff.raw;
@@ -1702,7 +1702,7 @@ mod tests {
 
 		let (root, db) = {
 			let mut state = State::new(db, U256::from(0), factories.clone());
-			state.set_storage(&a, storage_address.clone(), BigEndianHash::from_uint(&U256::from(20u64))).unwrap();
+			state.set_storage(&a, storage_address.clone(), BigEndianHash::from_uint(&U256::from(20u64)), &mut deepmind::NoopTracer).unwrap();
 			let dump = state.to_pod_full().unwrap();
 			assert_eq!(get_pod_state_val(&dump, &a, storage_address.clone()), BigEndianHash::from_uint(&U256::from(20u64)));
 			state.commit().unwrap();
@@ -1714,11 +1714,11 @@ mod tests {
 		let mut state = State::from_existing(db, root, U256::from(0u8), factories).unwrap();
 		let dump = state.to_pod_full().unwrap();
 		assert_eq!(get_pod_state_val(&dump, &a, storage_address.clone()), BigEndianHash::from_uint(&U256::from(20u64)));
-		state.set_storage(&a, storage_address.clone(), BigEndianHash::from_uint(&U256::from(21u64))).unwrap();
+		state.set_storage(&a, storage_address.clone(), BigEndianHash::from_uint(&U256::from(21u64)), &mut deepmind::NoopTracer).unwrap();
 		let dump = state.to_pod_full().unwrap();
 		assert_eq!(get_pod_state_val(&dump, &a, storage_address.clone()), BigEndianHash::from_uint(&U256::from(21u64)));
 		state.commit().unwrap();
-		state.set_storage(&a, storage_address.clone(), BigEndianHash::from_uint(&U256::from(0u64))).unwrap();
+		state.set_storage(&a, storage_address.clone(), BigEndianHash::from_uint(&U256::from(0u64)), &mut deepmind::NoopTracer).unwrap();
 		let dump = state.to_pod_full().unwrap();
 		assert_eq!(get_pod_state_val(&dump, &a, storage_address.clone()), BigEndianHash::from_uint(&U256::from(0u64)));
 	}

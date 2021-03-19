@@ -72,7 +72,7 @@ pub trait Ext<DM> where DM: deepmind::Tracer {
 	fn storage_at(&self, key: &H256) -> Result<H256>;
 
 	/// Stores a value for given key.
-	fn set_storage(&mut self, key: H256, value: H256) -> Result<()>;
+	fn set_storage(&mut self, key: H256, value: H256, dm_tracer: &mut DM) -> Result<()>;
 
 	/// Determine whether an account exists.
 	fn exists(&self, address: &Address) -> Result<bool>;
@@ -131,11 +131,11 @@ pub trait Ext<DM> where DM: deepmind::Tracer {
 	fn extcodesize(&self, address: &Address) -> Result<Option<usize>>;
 
 	/// Creates log entry with given topics and data
-	fn log(&mut self, topics: Vec<H256>, data: &[u8]) -> Result<()>;
+	fn log(&mut self, topics: Vec<H256>, data: &[u8], dm_tracer: &mut DM) -> Result<()>;
 
 	/// Should be called when transaction calls `RETURN` opcode.
 	/// Returns gas_left if cost of returning the data is not too high.
-	fn ret(self, gas: &U256, data: &ReturnData, apply_state: bool) -> Result<U256>;
+	fn ret(self, gas: &U256, data: &ReturnData, apply_state: bool, dm_tracer: &mut DM) -> Result<U256>;
 
 	/// Should be called when contract commits suicide.
 	/// Address to which funds should be refunded.

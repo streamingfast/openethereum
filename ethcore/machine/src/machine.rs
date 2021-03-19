@@ -177,11 +177,16 @@ impl Machine {
 	}
 
 	/// Push last known block hash to the state.
-	fn push_last_hash(&self, block: &mut ExecutedBlock) -> Result<(), Error> {
+	fn push_last_hash(&self, block: &mut ExecutedBlock, dm_context: &deepmind::Context) -> Result<(), Error> {
 		let params = self.params();
 		if block.header.number() == params.eip210_transition {
 			let state = block.state_mut();
-			state.init_code(&params.eip210_contract_address, params.eip210_contract_code.clone())?;
+
+			if dm_context.is_enabled() {
+				state.init_code(&params.eip210_contract_address, params.eip210_contract_code.clone(), &mut dm_context.block_tracer())?;
+			} else {
+				state.init_code(&params.eip210_contract_address, params.eip210_contract_code.clone(), &mut deepmind::NoopTracer)?;
+			}
 		}
 		if block.header.number() >= params.eip210_transition {
 			let parent_hash = *block.header.parent_hash();
@@ -198,7 +203,7 @@ impl Machine {
 	/// Logic to perform on a new block: updating last hashes and the DAO
 	/// fork, for ethash.
 	pub fn on_new_block(&self, block: &mut ExecutedBlock, dm_context: &deepmind::Context) -> Result<(), Error> {
-		self.push_last_hash(block)?;
+		self.push_last_hash(block, dm_context)?;
 
 		if let Some(ref ethash_params) = self.ethash_extensions {
 			if block.header.number() == ethash_params.dao_hardfork_transition {

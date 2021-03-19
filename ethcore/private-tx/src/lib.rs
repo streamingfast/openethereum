@@ -686,7 +686,7 @@ impl Provider {
 		let contract_code = Arc::new(self.get_decrypted_code(contract_address, block)?);
 		let contract_state = self.get_decrypted_state(contract_address, block)?;
 		trace!(target: "privatetx", "Patching contract at {:?}, code: {:?}, state: {:?}", contract_address, contract_code, contract_state);
-		state.patch_account(contract_address, contract_code, Self::snapshot_to_storage(contract_state))?;
+		state.patch_account(contract_address, contract_code, Self::snapshot_to_storage(contract_state), &mut deepmind::NoopTracer)?;
 		Ok(())
 	}
 
@@ -732,7 +732,7 @@ impl Provider {
 		let schedule = machine.schedule(env_info.number);
 		let result = Executive::new(&mut state, &env_info, &machine, &schedule).transact_virtual(transaction, options, deepmind::NoopTracer)?;
 		let (encrypted_code, encrypted_storage) = {
-			let (code, storage) = state.into_account(&contract_address)?;
+			let (code, storage) = state.into_account(&contract_address, &mut deepmind::NoopTracer)?;
 			trace!(target: "privatetx", "Private contract executed. code: {:?}, state: {:?}, result: {:?}", code, storage, result.output);
 			let enc_code = match code {
 				Some(c) => Some(self.encrypt(&contract_address, &Self::iv_from_address(&contract_address), &c)?),

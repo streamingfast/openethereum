@@ -147,11 +147,11 @@ impl<'a, T: 'a, V: 'a, B: 'a, DM: 'a> Ext<DM> for Externalities<'a, T, V, B, DM>
 		self.state.storage_at(&self.origin_info.address, key).map_err(Into::into)
 	}
 
-	fn set_storage(&mut self, key: H256, value: H256) -> vm::Result<()> {
+	fn set_storage(&mut self, key: H256, value: H256, dm_tracer: &mut DM) -> vm::Result<()> {
 		if self.static_flag {
 			Err(vm::Error::MutableCallInStaticContext)
 		} else {
-			self.state.set_storage(&self.origin_info.address, key, value).map_err(Into::into)
+			self.state.set_storage(&self.origin_info.address, key, value, dm_tracer).map_err(Into::into)
 		}
 	}
 
@@ -353,7 +353,7 @@ impl<'a, T: 'a, V: 'a, B: 'a, DM: 'a> Ext<DM> for Externalities<'a, T, V, B, DM>
 		Ok(self.state.code_size(address)?)
 	}
 
-	fn log(&mut self, topics: Vec<H256>, data: &[u8]) -> vm::Result<()> {
+	fn log(&mut self, topics: Vec<H256>, data: &[u8], dm_tracer: &mut DM) -> vm::Result<()> {
 		if self.static_flag {
 			return Err(vm::Error::MutableCallInStaticContext);
 		}
@@ -368,7 +368,7 @@ impl<'a, T: 'a, V: 'a, B: 'a, DM: 'a> Ext<DM> for Externalities<'a, T, V, B, DM>
 		Ok(())
 	}
 
-	fn ret(self, gas: &U256, data: &ReturnData, apply_state: bool) -> vm::Result<U256>
+	fn ret(self, gas: &U256, data: &ReturnData, apply_state: bool, dm_tracer: &mut DM) -> vm::Result<U256>
 		where Self: Sized {
 		match self.output {
 			OutputPolicy::Return => {
@@ -382,7 +382,7 @@ impl<'a, T: 'a, V: 'a, B: 'a, DM: 'a> Ext<DM> for Externalities<'a, T, V, B, DM>
 						false => Ok(*gas)
 					}
 				}
-				self.state.init_code(&self.origin_info.address, data.to_vec())?;
+				self.state.init_code(&self.origin_info.address, data.to_vec(), dm_tracer)?;
 				Ok(*gas - return_cost)
 			},
 			OutputPolicy::InitContract => {
@@ -622,7 +622,7 @@ mod tests {
 
 		{
 			let mut ext = Externalities::new(state, &setup.env_info, &setup.machine, &setup.schedule, 0, 0, &origin_info, &mut setup.sub_state, OutputPolicy::InitContract, &mut tracer, &mut vm_tracer, false);
-			ext.log(log_topics, &log_data).unwrap();
+			ext.log(log_topics, &log_data, &mut deepmind::NoopTracer).unwrap();
 		}
 
 		assert_eq!(setup.sub_state.logs.len(), 1);
