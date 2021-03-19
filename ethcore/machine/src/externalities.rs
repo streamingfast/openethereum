@@ -414,6 +414,13 @@ impl<'a, T: 'a, V: 'a, B: 'a, DM: 'a> Ext<DM> for Externalities<'a, T, V, B, DM>
 			)?;
 		}
 
+		if dm_tracer.is_enabled() {
+			// The `true` value in Geth is retrieved from the active state object prior suicide and represents
+			// if the account was **already** suicided, not sure it's relevant here, we can use false in all cases,
+			// it should even be removed from the console reader I think.
+			dm_tracer.record_suicide(&address, false, &balance);
+		}
+
 		self.tracer.trace_suicide(address, balance, refund_address.clone());
 		self.substate.suicides.insert(address);
 

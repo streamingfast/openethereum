@@ -70,6 +70,7 @@ pub trait Tracer: Send {
     fn record_nonce_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256) {}
     fn record_keccak(&mut self, _hash_of_data: &eth::H256, _data: &[u8]) {}
     fn record_new_account(&mut self, _addr: &eth::Address) {}
+    fn record_suicide(&mut self, _addr: &eth::Address, _already_suicided: bool, _balance_before_suicide: &eth::U256) {}
 
     // This one specifically is not quite aligned with Geth mainly on how Geth and OpenEthereum handles
     // transfer to inexistant account. In this case, Geth does not even generate an EVM call and as such
@@ -82,7 +83,6 @@ pub trait Tracer: Send {
     fn record_gas_refund(&mut self, _gas_old: u64, _gas_refund: u64) {}
     fn record_gas_consume(&mut self, _gas_old: u64, _gas_consumed: u64, _reason: GasChangeReason) {}
     fn record_storage_change(&mut self, _addr: &eth::Address, _key: &eth::H256, _old_data: &eth::H256, _new_data: &eth::H256) {}
-    fn record_suicide(&mut self, _addr: &eth::Address, _suicided: bool, _balance_before_suicide: &eth::U256) {}
     fn record_code_change(&mut self, _addr: &eth::Address, _input_hash: &eth::H256, _code_hash: &eth::H256, _old_code: &[u8], _new_code: &[u8]) {}
     fn record_before_call_gas_event(&mut self, _gas_value: u64) {}
     fn record_after_call_gas_event(&mut self, _gas_value: u64) {}
@@ -253,11 +253,11 @@ impl Tracer for TransactionTracer {
         ).as_ref());
     }
 
-    fn record_suicide(&mut self, address: &eth::Address, suicided: bool, balance_before_suicide: &eth::U256) {
-        self.printer.print(format!("SUICIDE_CHANGE {call_index} {address:x} {suicided} {balance_before_suicide:x}",
+    fn record_suicide(&mut self, address: &eth::Address, already_suicided: bool, balance_before_suicide: &eth::U256) {
+        self.printer.print(format!("SUICIDE_CHANGE {call_index} {address:x} {already_suicided} {balance_before_suicide:x}",
             call_index = self.active_call_index(),
             address = Address(address),
-            suicided = suicided,
+            already_suicided = already_suicided,
             balance_before_suicide = U256(balance_before_suicide),
         ).as_ref());
 
