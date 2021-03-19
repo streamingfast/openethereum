@@ -388,6 +388,11 @@ impl<Cost: CostType> Interpreter<Cost> {
 		}
 
 		if let InstructionResult::UnusedGas(ref gas) = result {
+			let gas_old = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas;
+			if dm_tracer.is_enabled() {
+				dm_tracer.record_gas_refund(gas_old.as_usize() as u64, gas.as_usize() as u64)
+			}
+
 			self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas + *gas;
 		}
 

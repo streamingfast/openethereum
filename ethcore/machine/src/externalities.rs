@@ -359,12 +359,17 @@ impl<'a, T: 'a, V: 'a, B: 'a, DM: 'a> Ext<DM> for Externalities<'a, T, V, B, DM>
 		}
 
 		let address = self.origin_info.address.clone();
-		self.substate.logs.push(LogEntry {
+		let entry = LogEntry {
 			address,
 			topics,
 			data: data.to_vec()
-		});
+		};
 
+		if dm_tracer.is_enabled() {
+			dm_tracer.record_log(entry.to_deepmind_log());
+		}
+
+		self.substate.logs.push(entry);
 		Ok(())
 	}
 

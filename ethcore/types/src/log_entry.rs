@@ -43,6 +43,15 @@ impl LogEntry {
 			b
 		})
 	}
+
+	/// Deep Mind data conversion into appropriate type, done like this to avoid dependency cycles between deepmind module and this one
+	pub fn to_deepmind_log(&self) -> deepmind::Log {
+		deepmind::Log {
+			address: self.address,
+			topics: &self.topics,
+			data: &self.data as &[u8],
+		}
+	}
 }
 
 impl From<ethjson::state::Log> for LogEntry {

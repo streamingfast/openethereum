@@ -930,6 +930,10 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 			return Err(ExecutionError::SenderMustExist);
 		}
 
+		if dm_tracer.is_enabled() {
+			dm_tracer.record_gas_consume(t.gas.as_u64(), base_gas_required.as_u64(), deepmind::GasChangeReason::IntrinsicGas);
+		}
+
 		let init_gas = t.gas - base_gas_required;
 
 		// validate transaction nonce

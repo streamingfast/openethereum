@@ -71,6 +71,7 @@ pub trait Tracer: Send {
     fn record_keccak(&mut self, _hash_of_data: &eth::H256, _data: &[u8]) {}
     fn record_new_account(&mut self, _addr: &eth::Address) {}
     fn record_suicide(&mut self, _addr: &eth::Address, _already_suicided: bool, _balance_before_suicide: &eth::U256) {}
+    fn record_storage_change(&mut self, _addr: &eth::Address, _key: &eth::H256, _old_data: &eth::H256, _new_data: &eth::H256) {}
 
     // This one specifically is not quite aligned with Geth mainly on how Geth and OpenEthereum handles
     // transfer to inexistant account. In this case, Geth does not even generate an EVM call and as such
@@ -79,15 +80,21 @@ pub trait Tracer: Send {
     // when no EVM call is generated, this would ensure we have 1 - 1 Blocks with Geth.
     fn record_call_without_code(&mut self) {}
 
+    // This one, we still need to fix the log_index_in_block value. This is semi problematic. There is no problem for the
+    // TransactionTracer that is mutable across the board. But the TransactionTracer is only for the transaction, it does not
+    // contain the block state. We need to hold the latest log index for the block, we would need a deepmind::Context mutable
+    // but we had a hell of a problem dealing with it. Maybe we will need a real BlockTracer that is re-used across the whole
+    // block, that is able to produce correct TransactionTracer from the current block state is could be mutated should enough
+    // to not cause the everywhere trickle down of mutatbility on each element.
+    fn record_log(&mut self, _log: Log) {}
+
     // Those are NOT integrated yet into OpenEthereum, they should work once printed, needs to validate that count match with Geth prior moving it above
     fn record_gas_refund(&mut self, _gas_old: u64, _gas_refund: u64) {}
     fn record_gas_consume(&mut self, _gas_old: u64, _gas_consumed: u64, _reason: GasChangeReason) {}
-    fn record_storage_change(&mut self, _addr: &eth::Address, _key: &eth::H256, _old_data: &eth::H256, _new_data: &eth::H256) {}
     fn record_code_change(&mut self, _addr: &eth::Address, _input_hash: &eth::H256, _code_hash: &eth::H256, _old_code: &[u8], _new_code: &[u8]) {}
     fn record_before_call_gas_event(&mut self, _gas_value: u64) {}
     fn record_after_call_gas_event(&mut self, _gas_value: u64) {}
 
-    // fn record_log(&mut self, log: *types.Log) {}
     // fn record_trx_pool(&mut self, event_type: string, tx *types.Transaction, err error) {}
 
     fn debug(&mut self, _input: String) {}
@@ -241,6 +248,19 @@ impl Tracer for TransactionTracer {
         if gas_refund != 0 {
             record_gas_change(&self.printer, self.active_call_index(), gas_old, gas_old+gas_refund, GasChangeReason::RefundAfterExecution);
         }
+    }
+
+    fn record_log(&mut self, log: Log) {
+        let topics: Vec<String> = log.topics.iter().map(|topic| H256(topic).to_hex()).collect();
+
+        // FIXME: Handle the log_index_in_block value!
+        self.printer.print(format!("ADD_LOG {call_index} {log_index_in_block} {address:x} {topics} {data:x}",
+            call_index = self.active_call_index(),
+            log_index_in_block = 0,
+            address = Address(&log.address),
+            topics = topics.join(","),
+            data = Hex(log.data),
+        ).as_ref());
     }
 
     fn record_storage_change(&mut self, address: &eth::Address, key: &eth::H256, old_data: &eth::H256, new_data: &eth::H256) {
@@ -569,18 +589,6 @@ impl Context {
     }
 }
 
-struct Address<'a>(&'a eth::Address);
-
-impl fmt::LowerHex for Address<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0.is_zero() {
-            return f.write_str(".")
-        }
-
-        fmt::LowerHex::fmt(self.0, f)
-    }
-}
-
 pub enum CallType {
     Call,
     CallCode,
@@ -624,15 +632,31 @@ pub struct Transaction<'a> {
     pub signature: (u64, eth::H256, eth::H256),
 }
 
+pub struct Log<'a> {
+    pub address: eth::Address,
+	pub topics: &'a Vec<eth::H256>,
+	pub data: &'a [u8],
+}
+
+struct Address<'a>(&'a eth::Address);
+
+impl fmt::LowerHex for Address<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0.is_zero() {
+            true => f.write_str("."),
+            _ => fmt::LowerHex::fmt(self.0, f)
+        }
+    }
+}
+
 struct Hex<'a>(&'a [u8]);
 
 impl fmt::LowerHex for Hex<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0.len() == 0 {
-            return f.write_str(".")
+        match self.0.len() {
+            0 => f.write_str("."),
+            _ => f.write_str(self.0.to_hex::<String>().as_ref()),
         }
-
-        f.write_str(self.0.to_hex::<String>().as_ref())
     }
 }
 
@@ -640,11 +664,13 @@ struct H256<'a>(&'a eth::H256);
 
 impl fmt::LowerHex for H256<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0.is_zero() {
-            return f.write_str(".")
-        }
-
         fmt::LowerHex::fmt(self.0, f)
+    }
+}
+
+impl H256<'_> {
+    pub fn to_hex(&self) -> String {
+        self.0.as_bytes().to_hex::<String>()
     }
 }
 
@@ -652,10 +678,9 @@ struct U256<'a>(&'a eth::U256);
 
 impl fmt::LowerHex for U256<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0.is_zero() {
-            return f.write_str(".")
+        match self.0.is_zero() {
+            true => f.write_str("."),
+            _ => fmt::LowerHex::fmt(self.0, f),
         }
-
-        fmt::LowerHex::fmt(self.0, f)
     }
 }

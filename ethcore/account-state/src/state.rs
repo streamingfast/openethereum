@@ -695,8 +695,13 @@ impl<B: Backend> State<B> {
 	/// Mutate storage of account `a` so that it is `value` for `key`.
 	pub fn set_storage<DM>(&mut self, a: &Address, key: H256, value: H256, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer  {
 		trace!(target: "state", "set_storage({}:{:x} to {:x})", a, key, value);
-		if self.storage_at(a, &key)? != value {
-			self.require(a, false, dm_tracer)?.set_storage(key, value)
+		let current_value = self.storage_at(a, &key)?;
+		if current_value != value {
+			self.require(a, false, dm_tracer)?.set_storage(key, value);
+
+			if dm_tracer.is_enabled() {
+				dm_tracer.record_storage_change(a, &key, &current_value, &value);
+			}
 		}
 
 		Ok(())
