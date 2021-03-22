@@ -424,9 +424,9 @@ impl Importer {
 
 		let is_epoch_begin = chain.epoch_transition(parent.number(), *header.parent_hash()).is_some();
 
-		let dm_context = &client.dm_context;
-		if dm_context.is_enabled() {
-			dm_context.start_block(header.number());
+		let mut dm_block_context = client.dm_context.block_context();
+		if dm_block_context.is_enabled() {
+			dm_block_context.start_block(header.number());
 		}
 
 		let enact_result = enact(
@@ -440,7 +440,8 @@ impl Importer {
 			last_hashes,
 			client.factories.clone(),
 			is_epoch_begin,
-			dm_context,
+			&client.dm_context,
+			&mut dm_block_context,
 		);
 
 		let mut locked_block = match enact_result {
@@ -451,8 +452,8 @@ impl Importer {
 			}
 		};
 
-		if dm_context.is_finalize_block_enabled() {
-			dm_context.finalize_block(header.number());
+		if dm_block_context.is_finalize_block_enabled() {
+			dm_block_context.finalize_block(header.number());
 		}
 
 		// Strip receipts for blocks before validate_receipts_transition,
@@ -477,10 +478,10 @@ impl Importer {
 			client
 		)?;
 
-		if dm_context.is_enabled() {
+		if dm_block_context.is_enabled() {
 			// FIXME: Transform Header and Vec<Header> (for uncles) into proper deepmind types that can be forwarded
 			// dm_context.end_block(header, block_bytes.len() as u64, &locked_block.uncles);
-			dm_context.end_block(header.number(), block_bytes.len() as u64);
+			dm_block_context.end_block(header.number(), block_bytes.len() as u64);
 		}
 
 		Ok((locked_block, pending))
@@ -667,7 +668,7 @@ impl Importer {
 							let machine = self.engine.machine();
 							let schedule = machine.schedule(env_info.number);
 							let res = Executive::new(&mut state, &env_info, &machine, &schedule)
-								.transact(&transaction, options, deepmind::NoopTracer);
+								.transact(&transaction, options, &mut deepmind::NoopTracer);
 
 							match res {
 								Err(e) => {
@@ -1280,7 +1281,7 @@ impl Client {
 			let original_state = if state_diff { Some(state.clone()) } else { None };
 			let schedule = machine.schedule(env_info.number);
 
-			let mut ret = Executive::new(state, env_info, &machine, &schedule).transact_virtual(transaction, options, deepmind::NoopTracer)?;
+			let mut ret = Executive::new(state, env_info, &machine, &schedule).transact_virtual(transaction, options, &mut deepmind::NoopTracer)?;
 
 			if let Some(original) = original_state {
 				ret.state_diff = Some(state.diff_from(original).map_err(ExecutionError::from)?);
@@ -1621,7 +1622,7 @@ impl Call for Client {
 			let machine = self.engine.machine();
 			let schedule = machine.schedule(env_info.number);
 			Executive::new(&mut clone, &env_info, &machine, &schedule)
-				.transact_virtual(&tx, options(), deepmind::NoopTracer)
+				.transact_virtual(&tx, options(), &mut deepmind::NoopTracer)
 		};
 
 		let cond = |gas| {

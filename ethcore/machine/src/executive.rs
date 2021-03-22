@@ -876,7 +876,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 	}
 
 	/// This function should be used to execute transaction.
-	pub fn transact<T, V, DM>(&'a mut self, t: &SignedTransaction, options: TransactOptions<T, V>, dm_tracer: DM)
+	pub fn transact<T, V, DM>(&'a mut self, t: &SignedTransaction, options: TransactOptions<T, V>, dm_tracer: &mut DM)
 		-> Result<Executed<T::Output, V::Output>, ExecutionError> where T: Tracer, V: VMTracer, DM: deepmind::Tracer
 	{
 		self.transact_with_tracer(
@@ -892,7 +892,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 	/// Execute a transaction in a "virtual" context.
 	/// This will ensure the caller has enough balance to execute the desired transaction.
 	/// Used for extra-block executions for things like consensus contracts and RPCs
-	pub fn transact_virtual<T, V, DM>(&'a mut self, t: &SignedTransaction, options: TransactOptions<T, V>, mut dm_tracer: DM)
+	pub fn transact_virtual<T, V, DM>(&'a mut self, t: &SignedTransaction, options: TransactOptions<T, V>, dm_tracer: &mut DM)
 		-> Result<Executed<T::Output, V::Output>, ExecutionError> where T: Tracer, V: VMTracer, DM: deepmind::Tracer
 	{
 		let sender = t.sender();
@@ -900,7 +900,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		let needed_balance = t.value.saturating_add(t.gas.saturating_mul(t.gas_price));
 		if balance < needed_balance {
 			// give the sender a sufficient balance
-			self.state.add_balance(&sender, &(needed_balance - balance), CleanupMode::NoEmpty, deepmind::BalanceChangeReason::Ignored, &mut dm_tracer)?;
+			self.state.add_balance(&sender, &(needed_balance - balance), CleanupMode::NoEmpty, deepmind::BalanceChangeReason::Ignored, dm_tracer)?;
 		}
 
 		self.transact(t, options, dm_tracer)
@@ -914,7 +914,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		output_from_create: bool,
 		mut tracer: T,
 		mut vm_tracer: V,
-		mut dm_tracer: DM,
+		dm_tracer: &mut DM,
 	) -> Result<Executed<T::Output, V::Output>, ExecutionError> where T: Tracer, V: VMTracer, DM: deepmind::Tracer {
 		let sender = t.sender();
 		let nonce = self.state.nonce(&sender)?;
@@ -963,14 +963,14 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 
 		let mut substate = Substate::new();
 
-		self.state.inc_nonce(&sender, &mut dm_tracer)?;
+		self.state.inc_nonce(&sender, dm_tracer)?;
 
 		self.state.sub_balance(
 			&sender,
 			&U256::try_from(gas_cost).expect("Total cost (value + gas_cost) is lower than max allowed balance (U256); gas_cost has to fit U256; qed"),
 			&mut cleanup_mode(&mut substate, &schedule),
 			deepmind::BalanceChangeReason::GasBuy,
-			&mut dm_tracer,
+			dm_tracer,
 		)?;
 
 		let (result, output) = match t.action {
@@ -991,7 +991,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 					action_type: ActionType::Create,
 					params_type: vm::ParamsType::Embedded,
 				};
-				let res = self.create(params, &mut substate, &mut tracer, &mut vm_tracer, &mut dm_tracer);
+				let res = self.create(params, &mut substate, &mut tracer, &mut vm_tracer, dm_tracer);
 				let out = match &res {
 					Ok(res) if output_from_create => res.return_data.to_vec(),
 					_ => Vec::new(),
@@ -1014,7 +1014,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 					action_type: ActionType::Call,
 					params_type: vm::ParamsType::Separate,
 				};
-				let res = self.call(params, &mut substate, &mut tracer, &mut vm_tracer, &mut dm_tracer);
+				let res = self.call(params, &mut substate, &mut tracer, &mut vm_tracer, dm_tracer);
 				let out = match &res {
 					Ok(res) => res.return_data.to_vec(),
 					_ => Vec::new(),
@@ -1024,7 +1024,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		};
 
 		// finalize here!
-		Ok(self.finalize(t, substate, result, output, tracer.drain(), vm_tracer.drain(), &mut dm_tracer)?)
+		Ok(self.finalize(t, substate, result, output, tracer.drain(), vm_tracer.drain(), dm_tracer)?)
 	}
 
 	/// Calls contract function with given contract params and stack depth.

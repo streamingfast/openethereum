@@ -527,6 +527,7 @@ impl Miner {
 		let block_start = Instant::now();
 		debug!(target: "miner", "Attempting to push {} transactions.", engine_txs.len() + queue_txs.len());
 
+		let mut dm_block_context = self.dm_context.block_context();
 		for transaction in engine_txs.into_iter().chain(queue_txs.into_iter().map(|tx| tx.signed().clone())) {
 			let start = Instant::now();
 
@@ -537,7 +538,7 @@ impl Miner {
 			let result = client.verify_for_pending_block(&transaction, &open_block.header)
 				.map_err(|e| e.into())
 				.and_then(|_| {
-					open_block.push_transaction(transaction, &self.dm_context)
+					open_block.push_transaction(transaction, &mut dm_block_context)
 				});
 
 			let took = start.elapsed();

@@ -85,7 +85,7 @@ macro_rules! bench_tx_apply {
 				$state.checkpoint();
 				let start = Instant::now();
 				for tx in &$signed_txs {
-					let outcome = $state.apply(&$env_info, &$machine, tx, $tracing);
+					let outcome = $state.apply(&$env_info, &$machine, tx, $tracing, &deepmind::Context::noop());
 					assert!(outcome.is_ok())
 				}
 				dur += start.elapsed();

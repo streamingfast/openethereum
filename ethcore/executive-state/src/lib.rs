@@ -96,7 +96,7 @@ pub fn check_proof(
 	};
 
 	let options = TransactOptions::with_no_tracing().save_output_from_contract();
-	match execute(&mut state, env_info, machine, transaction, options, true, deepmind::NoopTracer) {
+	match execute(&mut state, env_info, machine, transaction, options, true, &mut deepmind::NoopTracer) {
 		Ok(executed) => ProvedExecution::Complete(Box::new(executed)),
 		Err(ExecutionError::Internal(_)) => ProvedExecution::BadProof,
 		Err(e) => ProvedExecution::Failed(e),
@@ -130,7 +130,7 @@ pub fn prove_transaction_virtual<H: AsHashDB<KeccakHasher, DBValue> + Send + Syn
 	};
 
 	let options = TransactOptions::with_no_tracing().dont_check_nonce().save_output_from_contract();
-	match execute(&mut state, env_info, machine, transaction, options, true, deepmind::NoopTracer) {
+	match execute(&mut state, env_info, machine, transaction, options, true, &mut deepmind::NoopTracer) {
 		Err(ExecutionError::Internal(_)) => None,
 		Err(e) => {
 			trace!(target: "state", "Proved call failed: {}", e);
@@ -144,14 +144,14 @@ pub fn prove_transaction_virtual<H: AsHashDB<KeccakHasher, DBValue> + Send + Syn
 pub trait ExecutiveState {
 	/// Execute a given transaction, producing a receipt and an optional trace.
 	/// This will change the state accordingly.
-	fn apply(
+	fn apply<DM>(
 		&mut self,
 		env_info: &EnvInfo,
 		machine: &Machine,
 		t: &SignedTransaction,
 		tracing: bool,
-		dm_context: &deepmind::Context,
-	) -> ApplyResult<FlatTrace, VMTrace>;
+		dm_tracer: &mut DM,
+	) -> ApplyResult<FlatTrace, VMTrace> where DM: deepmind::Tracer;
 
 	/// Execute a given transaction with given tracer and VM tracer producing a receipt and an optional trace.
 	/// This will change the state accordingly.
@@ -161,7 +161,7 @@ pub trait ExecutiveState {
 		machine: &Machine,
 		t: &SignedTransaction,
 		options: TransactOptions<T, V>,
-		dm_tracer: DM,
+		dm_tracer: &mut DM,
 	) -> ApplyResult<T::Output, V::Output>
 		where
 			T: trace::Tracer,
@@ -172,30 +172,20 @@ pub trait ExecutiveState {
 impl<B: Backend> ExecutiveState for State<B> {
 	/// Execute a given transaction, producing a receipt and an optional trace.
 	/// This will change the state accordingly.
-	fn apply(
+	fn apply<DM>(
 		&mut self,
 		env_info: &EnvInfo,
 		machine: &Machine,
 		t: &SignedTransaction,
 		tracing: bool,
-		dm_context: &deepmind::Context,
-	) -> ApplyResult<FlatTrace, VMTrace> {
+		dm_tracer: &mut DM,
+	) -> ApplyResult<FlatTrace, VMTrace> where DM: deepmind::Tracer {
 		if tracing {
 			let options = TransactOptions::with_tracing();
-
-			if dm_context.is_enabled() {
-				self.apply_with_tracing(env_info, machine, t, options, dm_context.tracer())
-			} else {
-				self.apply_with_tracing(env_info, machine, t, options, deepmind::NoopTracer)
-			}
+			self.apply_with_tracing(env_info, machine, t, options, dm_tracer)
 		} else {
 			let options = TransactOptions::with_no_tracing();
-
-			if dm_context.is_enabled() {
-				self.apply_with_tracing(env_info, machine, t, options, dm_context.tracer())
-			} else {
-				self.apply_with_tracing(env_info, machine, t, options, deepmind::NoopTracer)
-			}
+			self.apply_with_tracing(env_info, machine, t, options, dm_tracer)
 		}
 	}
 
@@ -207,12 +197,12 @@ impl<B: Backend> ExecutiveState for State<B> {
 		machine: &Machine,
 		t: &SignedTransaction,
 		options: TransactOptions<T, V>,
-		dm_tracer: DM,
+		dm_tracer: &mut DM,
 	) -> ApplyResult<T::Output, V::Output>
 		where
 			T: trace::Tracer,
 			V: trace::VMTracer,
-			DM: deepmind::Tracer,
+			DM: deepmind::Tracer
 	{
 		let e = execute(self, env_info, machine, t, options, false, dm_tracer)?;
 		let params = machine.params();
@@ -257,13 +247,13 @@ fn execute<B, T, V, DM>(
 	t: &SignedTransaction,
 	options: TransactOptions<T, V>,
 	virt: bool,
-	dm_tracer: DM,
+	dm_tracer: &mut DM,
 ) -> Result<RawExecuted<T::Output, V::Output>, ExecutionError>
 	where
 		B: Backend,
 		T: trace::Tracer,
 		V: trace::VMTracer,
-		DM: deepmind::Tracer,
+		DM: deepmind::Tracer
 {
 	let schedule = machine.schedule(env_info.number);
 	let mut e = Executive::new(state, env_info, machine, &schedule);
@@ -384,7 +374,7 @@ mod tests {
 		}.sign(&secret(), None);
 
 		state.add_balance(&t.sender(), &(100.into()), CleanupMode::NoEmpty).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
 			action: trace::Action::Create(trace::Create {
@@ -422,7 +412,7 @@ mod tests {
 
 		state.init_code(&Address::from_low_u64_be(0xa), hex!("6000").to_vec()).unwrap();
 		state.add_balance(&t.sender(), &(100.into()), CleanupMode::NoEmpty).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
 			action: trace::Action::Call(trace::Call {
@@ -463,7 +453,7 @@ mod tests {
 		}.sign(&secret(), None);
 
 		state.add_balance(&t.sender(), &(100.into()), CleanupMode::NoEmpty).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
 			action: trace::Action::Call(trace::Call {
@@ -503,7 +493,7 @@ mod tests {
 			data: vec![],
 		}.sign(&secret(), None);
 
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
@@ -545,7 +535,7 @@ mod tests {
 		}.sign(&secret(), None);
 
 		state.init_code(&Address::from_low_u64_be(0xa), hex!("600060006000600060006001610be0f1").to_vec()).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
@@ -588,7 +578,7 @@ mod tests {
 
 		state.init_code(&Address::from_low_u64_be(0xa), hex!("60006000600060006000600b611000f2").to_vec()).unwrap();
 		state.init_code(&Address::from_low_u64_be(0xb), hex!("6000").to_vec()).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
@@ -647,7 +637,7 @@ mod tests {
 
 		state.init_code(&Address::from_low_u64_be(0xa), hex!("6000600060006000600b618000f4").to_vec()).unwrap();
 		state.init_code(&Address::from_low_u64_be(0xb), hex!("60056000526001601ff3").to_vec()).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
@@ -705,7 +695,7 @@ mod tests {
 
 		state.init_code(&Address::from_low_u64_be(0xa), hex!("5b600056").to_vec()).unwrap();
 		state.add_balance(&t.sender(), &(100.into()), CleanupMode::NoEmpty).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
 			action: trace::Action::Call(trace::Call {
@@ -745,7 +735,7 @@ mod tests {
 		state.init_code(&Address::from_low_u64_be(0xa), hex!("60006000600060006000600b602b5a03f1").to_vec()).unwrap();
 		state.init_code(&Address::from_low_u64_be(0xb), hex!("6000").to_vec()).unwrap();
 		state.add_balance(&t.sender(), &(100.into()), CleanupMode::NoEmpty).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
@@ -803,7 +793,7 @@ mod tests {
 
 		state.init_code(&Address::from_low_u64_be(0xa), hex!("60006000600060006045600b6000f1").to_vec()).unwrap();
 		state.add_balance(&t.sender(), &(100.into()), CleanupMode::NoEmpty).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
 			subtraces: 1,
@@ -857,7 +847,7 @@ mod tests {
 
 		state.init_code(&Address::from_low_u64_be(0xa), hex!("600060006000600060ff600b6000f1").to_vec()).unwrap();	// not enough funds.
 		state.add_balance(&t.sender(), &(100.into()), CleanupMode::NoEmpty).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
 			subtraces: 0,
@@ -900,7 +890,7 @@ mod tests {
 		state.init_code(&Address::from_low_u64_be(0xa), hex!("60006000600060006000600b602b5a03f1").to_vec()).unwrap();
 		state.init_code(&Address::from_low_u64_be(0xb), hex!("5b600056").to_vec()).unwrap();
 		state.add_balance(&t.sender(), &(100.into()), CleanupMode::NoEmpty).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
 			subtraces: 1,
@@ -956,7 +946,7 @@ mod tests {
 		state.init_code(&Address::from_low_u64_be(0xb), hex!("60006000600060006000600c602b5a03f1").to_vec()).unwrap();
 		state.init_code(&Address::from_low_u64_be(0xc), hex!("6000").to_vec()).unwrap();
 		state.add_balance(&t.sender(), &(100.into()), CleanupMode::NoEmpty).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
 			subtraces: 1,
@@ -1030,7 +1020,7 @@ mod tests {
 		state.init_code(&Address::from_low_u64_be(0xb), hex!("60006000600060006000600c602b5a03f1505b601256").to_vec()).unwrap();
 		state.init_code(&Address::from_low_u64_be(0xc), hex!("6000").to_vec()).unwrap();
 		state.add_balance(&t.sender(), &(100.into()), CleanupMode::NoEmpty).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
@@ -1101,7 +1091,7 @@ mod tests {
 		state.init_code(&Address::from_low_u64_be(0xa), hex!("73000000000000000000000000000000000000000bff").to_vec()).unwrap();
 		state.add_balance(&Address::from_low_u64_be(0xa), &50.into(), CleanupMode::NoEmpty).unwrap();
 		state.add_balance(&t.sender(), &100.into(), CleanupMode::NoEmpty).unwrap();
-		let result = state.apply(&info, &machine, &t, true).unwrap();
+		let result = state.apply(&info, &machine, &t, true, &deepmind::Context::noop()).unwrap();
 		let expected_trace = vec![FlatTrace {
 			trace_address: Default::default(),
 			subtraces: 1,

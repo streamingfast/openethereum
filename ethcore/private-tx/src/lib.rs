@@ -730,7 +730,7 @@ impl Provider {
 		}
 		let machine = engine.machine();
 		let schedule = machine.schedule(env_info.number);
-		let result = Executive::new(&mut state, &env_info, &machine, &schedule).transact_virtual(transaction, options, deepmind::NoopTracer)?;
+		let result = Executive::new(&mut state, &env_info, &machine, &schedule).transact_virtual(transaction, options, &mut deepmind::NoopTracer)?;
 		let (encrypted_code, encrypted_storage) = {
 			let (code, storage) = state.into_account(&contract_address, &mut deepmind::NoopTracer)?;
 			trace!(target: "privatetx", "Private contract executed. code: {:?}, state: {:?}, result: {:?}", code, storage, result.output);

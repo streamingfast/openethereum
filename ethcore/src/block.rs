@@ -30,6 +30,7 @@
 //!
 //! `ExecutedBlock` from the `machine` crate is the underlying data structure used by all structs
 //! above to store block related info.
+extern crate deepmind;
 
 use std::{cmp, ops};
 use std::sync::Arc;
@@ -54,7 +55,7 @@ use types::{
 	header::Header,
 	receipt::{Receipt, TransactionOutcome},
 };
-use executive_state::ExecutiveState;
+use executive_state::{ExecutiveState};
 use machine::ExecutedBlock;
 
 /// Block that is ready for transactions to be added.
@@ -116,7 +117,7 @@ impl<'x> OpenBlock<'x> {
 	) -> Result<Self, Error> {
 		let number = parent.number() + 1;
 		let state = State::from_existing(db, parent.state_root().clone(), engine.account_start_nonce(number), factories)?;
-		let mut r = OpenBlock { block: ExecutedBlock::new(state, last_hashes, tracing), engine, parent: parent.clone()};
+		let mut r = OpenBlock { block: ExecutedBlock::new(state, last_hashes, tracing), engine, parent: parent.clone() };
 
 		r.block.header.set_parent_hash(parent.hash());
 		r.block.header.set_number(number);
@@ -168,20 +169,32 @@ impl<'x> OpenBlock<'x> {
 	/// Push a transaction into the block.
 	///
 	/// If valid, it will be executed, and archived together with the receipt.
-	pub fn push_transaction(&mut self, t: SignedTransaction, dm_context: &deepmind::Context) -> Result<&Receipt, Error> {
+	pub fn push_transaction(&mut self, t: SignedTransaction, dm_block_context: &mut deepmind::BlockContext) -> Result<&Receipt, Error> {
 		if self.block.transactions_set.contains(&t.hash()) {
 			return Err(TransactionError::AlreadyImported.into());
 		}
 
-		if dm_context.is_enabled() {
-			dm_context.start_transaction(t.to_deepmind_transaction());
+		if dm_block_context.is_enabled() {
+			dm_block_context.start_transaction(t.to_deepmind_transaction());
 		}
 
 		let env_info = self.block.env_info();
-		let outcome = self.block.state.apply(&env_info, self.engine.machine(), &t, self.block.traces.is_enabled(), dm_context)?;
+		let outcome: executive_state::ApplyOutcome<trace::FlatTrace, trace::VMTrace>;
+		if dm_block_context.is_enabled() {
+			// Required otherwise `get_log_count` from Trait is not in scope for usage here without the `use` clause
+			use self::deepmind::Tracer;
 
-		if dm_context.is_enabled() {
-			dm_context.end_transaction();
+			let mut dm_tracer = dm_block_context.transaction_tracer();
+
+			outcome = self.block.state.apply(&env_info, self.engine.machine(), &t, self.block.traces.is_enabled(), &mut dm_tracer)?;
+
+			dm_block_context.record_log_count(dm_tracer.get_log_count());
+		} else {
+			outcome = self.block.state.apply(&env_info, self.engine.machine(), &t, self.block.traces.is_enabled(), &mut deepmind::NoopTracer)?;
+		}
+
+		if dm_block_context.is_enabled() {
+			dm_block_context.end_transaction();
 		}
 
 		self.block.transactions_set.insert(t.hash());
@@ -195,23 +208,23 @@ impl<'x> OpenBlock<'x> {
 
 	/// Push transactions onto the block.
 	#[cfg(not(feature = "slow-blocks"))]
-	fn push_transactions(&mut self, transactions: Vec<SignedTransaction>, dm_context: &deepmind::Context) -> Result<(), Error> {
+	fn push_transactions(&mut self, transactions: Vec<SignedTransaction>, dm_block_context: &mut deepmind::BlockContext) -> Result<(), Error> {
 		for t in transactions {
-			self.push_transaction(t, dm_context)?;
+			self.push_transaction(t, dm_block_context)?;
 		}
 		Ok(())
 	}
 
 	/// Push transactions onto the block.
 	#[cfg(feature = "slow-blocks")]
-	fn push_transactions(&mut self, transactions: Vec<SignedTransaction>, dm_context: &deepmind::Context) -> Result<(), Error> {
+	fn push_transactions(&mut self, transactions: Vec<SignedTransaction>, dm_block_context: &mut deepmind::BlockContext) -> Result<(), Error> {
 		use std::time;
 
 		let slow_tx = option_env!("SLOW_TX_DURATION").and_then(|v| v.parse().ok()).unwrap_or(100);
 		for t in transactions {
 			let hash = t.hash();
 			let start = time::Instant::now();
-			self.push_transaction(t, dm_context)?;
+			self.push_transaction(t, dm_block_context)?;
 			let elapsed_millis = start.elapsed().as_millis();
 			if elapsed_millis > slow_tx {
 				warn!("Heavy ({} ms) transaction in block {:?}: {:?}", elapsed_millis, self.block.header.number(), hash);
@@ -428,6 +441,7 @@ pub(crate) fn enact(
 	factories: Factories,
 	is_epoch_begin: bool,
 	dm_context: &deepmind::Context,
+	dm_block_context: &mut deepmind::BlockContext,
 ) -> Result<LockedBlock, Error> {
 	// For trace log
 	let trace_state = if log_enabled!(target: "enact", ::log::Level::Trace) {
@@ -461,7 +475,7 @@ pub(crate) fn enact(
 	}
 
 	b.populate_from(header);
-	b.push_transactions(transactions, dm_context)?;
+	b.push_transactions(transactions, dm_block_context)?;
 
 	for u in uncles {
 		b.push_uncle(u)?;

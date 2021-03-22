@@ -58,14 +58,13 @@ impl Printer for IoPrinter {
 }
 
 pub trait Tracer: Send {
+    // Those are done integrating into OpenEthereum code, and they count matched Geth version (still missing 1 - 1 comparison)
     fn is_enabled(&self) -> bool { false }
     fn start_call(&mut self, _call: Call) {}
     fn reverted_call(&self, _gas_left: &eth::U256) {}
     fn failed_call(&mut self, _gas_left: &eth::U256, _gas_left_after_failure: &eth::U256, _err: &String) {}
     fn end_call(&mut self, _gas_left: &eth::U256, _return_data: &[u8]) {}
     fn end_failed_call(&mut self) {}
-
-    // Those are done integrating into OpenEthereum code, and they count matched Geth version (still missing 1 - 1 comparison)
     fn record_balance_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256, _reason: BalanceChangeReason) {}
     fn record_nonce_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256) {}
     fn record_keccak(&mut self, _hash_of_data: &eth::H256, _data: &[u8]) {}
@@ -95,6 +94,8 @@ pub trait Tracer: Send {
     fn record_before_call_gas_event(&mut self, _gas_value: u64) {}
     fn record_after_call_gas_event(&mut self, _gas_value: u64) {}
 
+    /// Returns the number of Ethereum Log that was performed as part of this tracer
+    fn get_log_count(&self) -> u64 { return 0 }
     // fn record_trx_pool(&mut self, event_type: string, tx *types.Transaction, err error) {}
 
     fn debug(&mut self, _input: String) {}
@@ -134,6 +135,8 @@ pub struct TransactionTracer {
     call_index: u64,
     call_stack: Vec<u64>,
     gas_left_after_latest_failure: Option<eth::U256>,
+    log_in_block_index: u64,
+    log_count: u64,
 }
 
 impl Tracer for TransactionTracer {
@@ -253,14 +256,16 @@ impl Tracer for TransactionTracer {
     fn record_log(&mut self, log: Log) {
         let topics: Vec<String> = log.topics.iter().map(|topic| H256(topic).to_hex()).collect();
 
-        // FIXME: Handle the log_index_in_block value!
         self.printer.print(format!("ADD_LOG {call_index} {log_index_in_block} {address:x} {topics} {data:x}",
             call_index = self.active_call_index(),
-            log_index_in_block = 0,
+            log_index_in_block = self.log_in_block_index,
             address = Address(&log.address),
             topics = topics.join(","),
             data = Hex(log.data),
         ).as_ref());
+
+        self.log_count += 1;
+        self.log_in_block_index += 1;
     }
 
     fn record_storage_change(&mut self, address: &eth::Address, key: &eth::H256, old_data: &eth::H256, new_data: &eth::H256) {
@@ -335,6 +340,10 @@ impl Tracer for TransactionTracer {
             reason = "before_call",
             gas_value = gas_value,
         ).as_ref());
+    }
+
+    fn get_log_count(&self) -> u64 {
+        self.log_count
     }
 
     fn debug(&mut self, input: String) {
@@ -530,12 +539,17 @@ impl Context {
         }
     }
 
-    pub fn block_tracer(&self) -> BlockTracer {
-        BlockTracer{printer: self.printer.clone()}
+    pub fn block_context(&self) -> BlockContext {
+        BlockContext {
+            context: self,
+            is_enabled: self.is_enabled(),
+            is_finalize_block_enabled: self.is_finalize_block_enabled(),
+            log_index_at_block: 0,
+        }
     }
 
-    pub fn tracer(&self) -> TransactionTracer {
-        TransactionTracer{printer: self.printer.clone(), call_index: 0, call_stack: Vec::with_capacity(16), gas_left_after_latest_failure: None}
+    pub fn block_tracer(&self) -> BlockTracer {
+        BlockTracer{printer: self.printer.clone()}
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -545,20 +559,37 @@ impl Context {
     pub fn is_finalize_block_enabled(&self) -> bool {
         return self.instrumentation == Instrumentation::Full || self.instrumentation == Instrumentation::BlockProgress;
     }
+}
+
+pub struct BlockContext<'a> {
+    context: &'a Context,
+    is_enabled: bool,
+    is_finalize_block_enabled: bool,
+    log_index_at_block: u64,
+}
+
+impl<'a> BlockContext<'a> {
+    pub fn is_enabled(&self) -> bool {
+        self.is_enabled
+    }
+
+    pub fn is_finalize_block_enabled(&self) -> bool {
+        self.is_finalize_block_enabled
+    }
 
     pub fn start_block(&self, num: u64) {
-        self.printer.print(format!("BEGIN_BLOCK {num}", num = num).as_ref())
+        self.context.printer.print(format!("BEGIN_BLOCK {num}", num = num).as_ref())
     }
 
-    pub fn finalize_block(&self, num: u64) {
-        self.printer.print(format!("FINALIZE_BLOCK {num}", num = num).as_ref())
-    }
-
-    pub fn end_block(&self, num: u64, size: u64, /*, header, uncle_headers */) {
-        self.printer.print(format!("END_BLOCK {num} {size}",
-            num = num,
-            size = size,
-        ).as_ref())
+    pub fn transaction_tracer(&self) -> TransactionTracer {
+        TransactionTracer{
+            printer: self.context.printer.clone(),
+            call_index: 0,
+            call_stack: Vec::with_capacity(16),
+            gas_left_after_latest_failure: None,
+            log_in_block_index: self.log_index_at_block,
+            log_count: 0,
+        }
     }
 
     pub fn start_transaction(&self, trx: Transaction) {
@@ -568,7 +599,7 @@ impl Context {
             to_str = format!("{:x}", Address(address));
         }
 
-        self.printer.print(format!("BEGIN_APPLY_TRX {hash:x} {to} {value:x} {v:x} {r:x} {s:x} {gas_limit} {gas_price:x} {nonce} {data:x}",
+        self.context.printer.print(format!("BEGIN_APPLY_TRX {hash:x} {to} {value:x} {v:x} {r:x} {s:x} {gas_limit} {gas_price:x} {nonce} {data:x}",
             hash = H256(&trx.hash),
             to = to_str,
             value = U256(&trx.value),
@@ -581,11 +612,26 @@ impl Context {
             data = Hex(&trx.data),
         ).as_ref());
 
-        self.printer.print(format!("TRX_FROM {from:x}", from = Address(&trx.from)).as_ref());
+        self.context.printer.print(format!("TRX_FROM {from:x}", from = Address(&trx.from)).as_ref());
+    }
+
+    pub fn record_log_count(&mut self, count: u64) {
+        self.log_index_at_block += count;
     }
 
     pub fn end_transaction(&self) {
-        self.printer.print(format!("END_APPLY_TRX").as_ref())
+        self.context.printer.print(format!("END_APPLY_TRX").as_ref())
+    }
+
+    pub fn finalize_block(&self, num: u64) {
+        self.context.printer.print(format!("FINALIZE_BLOCK {num}", num = num).as_ref())
+    }
+
+    pub fn end_block(&self, num: u64, size: u64, /*, header, uncle_headers */) {
+        self.context.printer.print(format!("END_BLOCK {num} {size}",
+            num = num,
+            size = size,
+        ).as_ref())
     }
 }
 
