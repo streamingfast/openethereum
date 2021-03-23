@@ -479,11 +479,12 @@ impl Importer {
 		)?;
 
 		if dm_block_context.is_enabled() {
-			// FIXME: Transform Header and Vec<Header> (for uncles) into proper deepmind types that can be forwarded
-			// dm_context.end_block(header, block_bytes.len() as u64, &locked_block.uncles);
-			dm_block_context.end_block(header.number(), block_bytes.len() as u64);
+			let mut uncles : Vec<deepmind::Header> = Vec::new();
+			for u in &locked_block.uncles {
+				uncles.push(u.to_deepmind())
+			}
+			dm_block_context.end_block(header.number(), block_bytes.len() as u64, header.to_deepmind(), uncles);
 		}
-
 		Ok((locked_block, pending))
 	}
 
