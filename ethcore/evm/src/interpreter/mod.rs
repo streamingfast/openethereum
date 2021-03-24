@@ -368,7 +368,12 @@ impl<Cost: CostType> Interpreter<Cost> {
 					// usually 32000 (schedule.gas... here) and another one with the dynamic portion of the op code. We
 					// need to replicate this behavior here, so we compute that gas change in step if required.
 					let mut current_gas = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas;
+					let current_gas_mem = self.gasometer.as_ref().expect(GASOMETER_PROOF).current_mem_gas;
 					let mut gas_cost = requirements.gas_cost;
+
+					if self.should_record_gas_event(instruction) {
+						dm_tracer.record_before_call_gas_event(current_gas.as_u256().as_usize());
+					}
 
 					if dm_reason == deepmind::GasChangeReason::ContractCreation || dm_reason == deepmind::GasChangeReason::ContractCreation2 {
 						dm_tracer.record_gas_consume(current_gas.as_usize(), schedule.create_gas, dm_reason);
@@ -376,11 +381,12 @@ impl<Cost: CostType> Interpreter<Cost> {
 						current_gas = current_gas - Cost::from(schedule.create_gas);
 						gas_cost = gas_cost - Cost::from(schedule.create_gas);
 					}
-
-					dm_tracer.record_gas_consume(current_gas.as_usize(), gas_cost.as_usize(), dm_reason)
+					dm_tracer.record_gas_consume(current_gas.as_usize(), gas_cost.as_usize(), dm_reason);
 				}
 
 				self.mem.expand(requirements.memory_required_size);
+
+
 				self.gasometer.as_mut().expect(GASOMETER_PROOF).current_mem_gas = requirements.memory_total_gas;
 				self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas - requirements.gas_cost;
 
@@ -388,6 +394,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 
 				// Execute instruction
 				let current_gas = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas;
+
 				let result = match self.exec_instruction(
 					current_gas, ext, instruction, requirements.provide_gas, dm_tracer
 				) {
@@ -399,6 +406,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 					},
 					Ok(x) => x,
 				};
+
 				evm_debug!({ self.informant.after_instruction(instruction) });
 				result
 			},
@@ -411,10 +419,15 @@ impl<Cost: CostType> Interpreter<Cost> {
 		if let InstructionResult::UnusedGas(ref gas) = result {
 			let gas_old = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas;
 			if dm_tracer.is_enabled() {
-				dm_tracer.record_gas_refund(gas_old.as_usize(), gas.as_usize())
+				dm_tracer.record_gas_refund(gas_old.as_usize(), gas.as_usize());
+
+			}
+			self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas + *gas;
+
+			if dm_tracer.is_enabled() {
+				dm_tracer.record_after_call_gas_event(self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas.as_usize())
 			}
 
-			self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas + *gas;
 		}
 
 		if self.do_trace {
@@ -457,6 +470,11 @@ impl<Cost: CostType> Interpreter<Cost> {
 		}
 
 		InterpreterResult::Continue
+	}
+
+	// List of opcodes for which we will add a BeforeCall and AfterCall gas events pair
+	fn should_record_gas_event(&self, instruction: Instruction) -> bool {
+		return instruction == instructions::CREATE || instruction == instructions::CREATE2 || instruction == instructions::CALL || instruction == instructions::STATICCALL || instruction == instructions::CALLCODE || instruction == instructions::DELEGATECALL
 	}
 
 	fn verify_instruction<DM>(&self, ext: &dyn vm::Ext<DM>, instruction: Instruction, info: &InstructionInfo) -> vm::Result<()> where DM: deepmind::Tracer {
@@ -612,6 +630,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 			instructions::CALL | instructions::CALLCODE | instructions::DELEGATECALL | instructions::STATICCALL => {
 				assert!(ext.schedule().call_value_transfer_gas > ext.schedule().call_stipend, "overflow possible");
 
+
 				self.stack.pop_back();
 				let call_gas = provided.expect("`provided` comes through Self::exec from `Gasometer::get_gas_cost_mem`; `gas_gas_mem_cost` guarantees `Some` when instruction is `CALL`/`CALLCODE`/`DELEGATECALL`/`CREATE`; this is one of `CALL`/`CALLCODE`/`DELEGATECALL`; qed");
 				let code_address = self.stack.pop_back();
@@ -665,7 +684,9 @@ impl<Cost: CostType> Interpreter<Cost> {
 
 				let call_result = {
 					let input = self.mem.read_slice(in_off, in_size);
+
 					ext.call(&call_gas.as_u256(), sender_address, receive_address, value, input, &code_address, call_type, true, dm_tracer)
+
 				};
 
 				self.resume_output_range = Some((out_off, out_size));

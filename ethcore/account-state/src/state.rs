@@ -710,13 +710,13 @@ impl<B: Backend> State<B> {
 	/// Initialise the code of account `a` so that it is `code`.
 	/// NOTE: Account should have been created with `new_contract`.
 	pub fn init_code<DM>(&mut self, a: &Address, code: Bytes, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
-		self.require_or_from(a, true, || Account::new_contract(0.into(), self.account_start_nonce, 0.into(),KECCAK_NULL_RLP), |_| {}, dm_tracer)?.init_code(code);
+		self.require_or_from(a, true, || Account::new_contract(0.into(), self.account_start_nonce, 0.into(),KECCAK_NULL_RLP), |_| {}, dm_tracer)?.init_code(a, code, dm_tracer);
 		Ok(())
 	}
 
 	/// Reset the code of account `a` so that it is `code`.
 	pub fn reset_code<DM>(&mut self, a: &Address, code: Bytes, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
-		self.require_or_from(a, true, || Account::new_contract(0.into(), self.account_start_nonce, 0.into(), KECCAK_NULL_RLP), |_| {}, dm_tracer)?.reset_code(code);
+		self.require_or_from(a, true, || Account::new_contract(0.into(), self.account_start_nonce, 0.into(), KECCAK_NULL_RLP), |_| {}, dm_tracer)?.reset_code(a, code, dm_tracer);
 		Ok(())
 	}
 

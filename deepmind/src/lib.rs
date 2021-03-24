@@ -87,8 +87,8 @@ pub trait Tracer: Send {
     fn record_gas_refund(&mut self, _gas_old: usize, _gas_refund: usize) {}
     fn record_gas_consume(&mut self, _gas_old: usize, _gas_consumed: usize, _reason: GasChangeReason) {}
     fn record_code_change(&mut self, _addr: &eth::Address, _input_hash: &eth::H256, _code_hash: &eth::H256, _old_code: &[u8], _new_code: &[u8]) {}
-    fn record_before_call_gas_event(&mut self, _gas_value: u64) {}
-    fn record_after_call_gas_event(&mut self, _gas_value: u64) {}
+    fn record_before_call_gas_event(&mut self, _gas_value: usize) {}
+    fn record_after_call_gas_event(&mut self, _gas_value: usize) {}
     // fn record_trx_pool(&mut self, event_type: string, tx *types.Transaction, err error) {}
 
     /// Returns the number of Ethereum Log that was performed as part of this tracer
@@ -129,6 +129,7 @@ impl Tracer for BlockTracer {
 pub struct TransactionTracer {
     printer: Arc<Box<dyn Printer>>,
     call_index: u64,
+	last_pop_call_index: Option<u64>,
     call_stack: Vec<u64>,
     gas_left_after_latest_failure: Option<eth::U256>,
     log_in_block_index: u64,
@@ -144,7 +145,7 @@ impl Tracer for TransactionTracer {
         self.call_index += 1;
         self.call_stack.push(self.call_index);
 
-        self.printer.print(format!("EVM_RUN_CALL {call_type} {call_index}",
+		self.printer.print(format!("EVM_RUN_CALL {call_type} {call_index}",
             call_type = call.call_type,
             call_index = self.call_index,
         ).as_ref());
@@ -191,6 +192,8 @@ impl Tracer for TransactionTracer {
            Some(index) => index,
            None => panic!("There should always be a call in our call index stack")
        };
+
+		self.last_pop_call_index = Some(call_index);
 
         self.printer.print(format!("EVM_END_CALL {call_index} {gas_left:} {return_value:x}",
             call_index = call_index,
@@ -309,31 +312,32 @@ impl Tracer for TransactionTracer {
         ).as_ref());
     }
 
-    fn record_before_call_gas_event(&mut self, gas_value: u64) {
-        // // The `ctx.nextCallIndex` has not been incremented yet, so we add +1 for the linked call index
+    fn record_before_call_gas_event(&mut self, gas_value: usize) {
+		// // The `ctx.nextCallIndex` has not been incremented yet, so we add +1 for the linked call index
         // ctx.printer.Print("GAS_EVENT", ctx.callIndex(), Uint64(ctx.nextCallIndex+1), "before_call", Uint64(gasValue))
         let call_index = self.active_call_index();
 
         // Matt: Validate against Geth logic, see commented code at top of this implementation
         self.printer.print(format!("GAS_EVENT {call_index} {for_call_index} {reason} {gas_value}",
             call_index = call_index,
-            for_call_index = call_index + 1,
+            for_call_index = self.call_index,
             reason = "before_call",
-            gas_value = gas_value,
+            gas_value = gas_value as u64,
         ).as_ref());
     }
 
-    fn record_after_call_gas_event(&mut self, gas_value: u64) {
-        // // The `ctx.nextCallIndex` is already pointing to previous call index, so we simply use it for the linked call index
-	    // ctx.printer.Print("GAS_EVENT", ctx.callIndex(), Uint64(ctx.nextCallIndex), "after_call", Uint64(gasValue))
-        let call_index = self.active_call_index();
-
+    fn record_after_call_gas_event(&mut self, gas_value: usize) {
+		if self.last_pop_call_index.is_none() {
+			panic!("there should always have been a call pop before we print the after call gas event")
+		}
+		let call_index = self.active_call_index();
+		let for_call_index = self.last_pop_call_index.unwrap();
         // Matt: Validate against Geth logic, see commented code at top of this implementation
         self.printer.print(format!("GAS_EVENT {call_index} {for_call_index} {reason} {gas_value}",
             call_index = call_index,
-            for_call_index = call_index,
-            reason = "before_call",
-            gas_value = gas_value,
+            for_call_index = for_call_index,
+            reason = "after_call",
+            gas_value = gas_value  as u64,
         ).as_ref());
     }
 
@@ -580,6 +584,7 @@ impl<'a> BlockContext<'a> {
         TransactionTracer{
             printer: self.context.printer.clone(),
             call_index: 0,
+			last_pop_call_index: None,
             call_stack: Vec::with_capacity(16),
             gas_left_after_latest_failure: None,
             log_in_block_index: self.log_index_at_block,

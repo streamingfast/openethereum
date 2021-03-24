@@ -204,16 +204,21 @@ impl Account {
 
 	/// Set this account's code to the given code.
 	/// NOTE: Account should have been created with `new_contract()`
-	pub fn init_code(&mut self, code: Bytes) {
-		self.code_hash = keccak(&code);
+	pub fn init_code<DM>(&mut self, a: &Address, code: Bytes, dm_tracer: &mut DM) where DM: deepmind::Tracer {
+		let new_code_hash = keccak(&code);
+		if dm_tracer.is_enabled() {
+			dm_tracer.record_code_change(a, &self.code_hash, &new_code_hash, self.code_cache.as_ref(), code.as_slice());
+		}
+
+		self.code_hash = new_code_hash;
 		self.code_cache = Arc::new(code);
 		self.code_size = Some(self.code_cache.len());
 		self.code_filth = Filth::Dirty;
 	}
 
 	/// Reset this account's code to the given code.
-	pub fn reset_code(&mut self, code: Bytes) {
-		self.init_code(code);
+	pub fn reset_code<DM>(&mut self, a: &Address, code: Bytes, dm_tracer: &mut DM) where DM: deepmind::Tracer {
+		self.init_code(a, code, dm_tracer);
 	}
 
 	/// Reset this account's code and storage to given values.
