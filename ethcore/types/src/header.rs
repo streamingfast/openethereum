@@ -317,6 +317,27 @@ impl Header {
 			}
 		}
 	}
+
+	/// Deep Mind data conversion into appropriate type, done like this to avoid dependency cycles between deepmind module and this one
+	pub fn to_deepmind(&self) -> deepmind::Header {
+		deepmind::Header {
+			parent_hash: self.parent_hash,
+			sha3_uncles: self.uncles_hash,
+			miner: self.author,
+			state_root: self.state_root,
+			transactions_root: self.transactions_root,
+			receipts_root: self.receipts_root,
+			logs_bloom: deepmind::Hex(self.log_bloom.as_bytes()),
+			difficulty: self.difficulty,
+			number: deepmind::U64(self.number),
+			gas_limit: self.gas_limit,
+			gas_used: self.gas_used,
+			timestamp: deepmind::U64(self.timestamp),
+			extra_data: deepmind::Hex(&self.extra_data),
+			hash: self.hash()
+		}
+
+	}
 }
 
 /// Alter value of given field, reset memoised hash if changed.

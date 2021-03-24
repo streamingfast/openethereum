@@ -1,6 +1,7 @@
 use std::{fmt, sync::Arc};
 use rustc_hex::ToHex;
 use ethereum_types as eth;
+use serde::{Serialize, Serializer};
 
 static EMPTY_BYTES: [u8; 0] = [];
 #[derive(Debug, PartialEq, Clone)]
@@ -205,7 +206,6 @@ impl Tracer for TransactionTracer {
         };
 
         self.gas_left_after_latest_failure = None;
-
         self.end_call(&gas_left, &[])
     }
 
@@ -622,10 +622,17 @@ impl<'a> BlockContext<'a> {
         self.context.printer.print(format!("FINALIZE_BLOCK {num}", num = num).as_ref())
     }
 
-    pub fn end_block(&self, num: u64, size: u64, /*, header, uncle_headers */) {
-        self.context.printer.print(format!("END_BLOCK {num} {size}",
+    pub fn end_block(&self, num: u64, size: u64, header: Header, uncles: Vec<Header>) {
+		let meta = BlockEndMeta{
+			header: header,
+			uncles: uncles
+		};
+		let serialized = serde_json::to_string(&meta).unwrap();
+
+		self.context.printer.print(format!("END_BLOCK {num} {size} {meta}",
             num = num,
             size = size,
+			meta = serialized,
         ).as_ref())
     }
 }
@@ -673,6 +680,33 @@ pub struct Transaction<'a> {
     pub signature: (u64, eth::H256, eth::H256),
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Header<'a> {
+	pub parent_hash: eth::H256,
+	pub sha3_uncles: eth::H256,
+	pub miner: eth::Address,
+	pub state_root: eth::H256,
+	pub transactions_root: eth::H256,
+	pub receipts_root: eth::H256,
+	pub logs_bloom: Hex<'a>,
+	pub difficulty: eth::U256,
+	pub number: U64,
+	pub gas_limit: eth::U256,
+	pub gas_used: eth::U256,
+	pub timestamp: U64,
+	pub extra_data: Hex<'a>,
+	// pub mix_hash: eth::H256,
+	// pub nonce: H256,
+	pub hash: eth::H256,
+}
+
+#[derive(Serialize)]
+pub struct BlockEndMeta<'a> {
+	pub header: Header<'a>,
+	pub uncles: Vec<Header<'a>>
+}
+
 pub struct Log<'a> {
     pub address: eth::Address,
 	pub topics: &'a Vec<eth::H256>,
@@ -690,7 +724,7 @@ impl fmt::LowerHex for Address<'_> {
     }
 }
 
-struct Hex<'a>(&'a [u8]);
+pub struct Hex<'a>(pub &'a [u8]);
 
 impl fmt::LowerHex for Hex<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -700,6 +734,16 @@ impl fmt::LowerHex for Hex<'_> {
         }
     }
 }
+
+impl serde::Serialize for Hex<'_> {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+		where
+			S: Serializer,
+	{
+		serializer.serialize_str(&format!("0x{:}",self.0.to_hex::<String>()))
+	}
+}
+
 
 struct H256<'a>(&'a eth::H256);
 
@@ -725,3 +769,16 @@ impl fmt::LowerHex for U256<'_> {
         }
     }
 }
+
+pub struct U64(pub u64);
+
+impl serde::Serialize for U64 {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+		where
+			S: Serializer,
+	{
+		serializer.serialize_str(&format!("0x{:x}",self.0))
+	}
+
+}
+
