@@ -104,7 +104,7 @@ fn simple_loop_log0(gas: U256, b: &mut Bencher) {
 
 		let vm = factory.create(params, ext.schedule(), 0);
 
-		result(vm.exec(&mut ext).ok().unwrap())
+		result(vm.exec(&mut ext, &mut deepmind::NoopTracer).ok().unwrap())
 	});
 }
 
@@ -138,7 +138,7 @@ fn mem_gas_calculation_same(gas: U256, b: &mut Bencher) {
 
 		let vm = factory.create(params, ext.schedule(), 0);
 
-		result(vm.exec(&mut ext).ok().unwrap())
+		result(vm.exec(&mut ext, &mut deepmind::NoopTracer).ok().unwrap())
 	});
 }
 
@@ -172,7 +172,7 @@ fn mem_gas_calculation_increasing(gas: U256, b: &mut Bencher) {
 
 		let vm = factory.create(params, ext.schedule(), 0);
 
-		result(vm.exec(&mut ext).ok().unwrap())
+		result(vm.exec(&mut ext, &mut deepmind::NoopTracer).ok().unwrap())
 	});
 }
 
@@ -195,7 +195,7 @@ fn blockhash_mulmod_small(b: &mut Criterion) {
 
 			let vm = factory.create(params, ext.schedule(), 0);
 
-			result(vm.exec(&mut ext).ok().unwrap())
+			result(vm.exec(&mut ext, &mut deepmind::NoopTracer).ok().unwrap())
 		});
 	});
 }
@@ -219,7 +219,7 @@ fn blockhash_mulmod_large(b: &mut Criterion) {
 
 			let vm = factory.create(params, ext.schedule(), 0);
 
-			result(vm.exec(&mut ext).ok().unwrap())
+			result(vm.exec(&mut ext, &mut deepmind::NoopTracer).ok().unwrap())
 		});
 	});
 }
@@ -242,7 +242,7 @@ fn run_code(b: &mut Bencher, code: Bytes) {
 		params.gas = U256::MAX;
 		params.code = Some(Arc::new(black_box(code.clone())));
 		let vm = factory.create(params, ext.schedule(), 0);
-		result(vm.exec(&mut ext).ok().unwrap())
+		result(vm.exec(&mut ext, &mut deepmind::NoopTracer).ok().unwrap())
 	});
 }
 

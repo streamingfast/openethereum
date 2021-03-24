@@ -60,17 +60,20 @@ impl Printer for IoPrinter {
 pub trait Tracer: Send {
     // Those are done integrating into OpenEthereum code, and they count matched Geth version (still missing 1 - 1 comparison)
     fn is_enabled(&self) -> bool { false }
+
     fn start_call(&mut self, _call: Call) {}
     fn reverted_call(&self, _gas_left: &eth::U256) {}
     fn failed_call(&mut self, _gas_left: &eth::U256, _gas_left_after_failure: &eth::U256, _err: &String) {}
     fn end_call(&mut self, _gas_left: &eth::U256, _return_data: &[u8]) {}
     fn end_failed_call(&mut self) {}
+
     fn record_balance_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256, _reason: BalanceChangeReason) {}
     fn record_nonce_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256) {}
     fn record_keccak(&mut self, _hash_of_data: &eth::H256, _data: &[u8]) {}
     fn record_new_account(&mut self, _addr: &eth::Address) {}
     fn record_suicide(&mut self, _addr: &eth::Address, _already_suicided: bool, _balance_before_suicide: &eth::U256) {}
     fn record_storage_change(&mut self, _addr: &eth::Address, _key: &eth::H256, _old_data: &eth::H256, _new_data: &eth::H256) {}
+    fn record_log(&mut self, _log: Log) {}
 
     // This one specifically is not quite aligned with Geth mainly on how Geth and OpenEthereum handles
     // transfer to inexistant account. In this case, Geth does not even generate an EVM call and as such
@@ -79,24 +82,16 @@ pub trait Tracer: Send {
     // when no EVM call is generated, this would ensure we have 1 - 1 Blocks with Geth.
     fn record_call_without_code(&mut self) {}
 
-    // This one, we still need to fix the log_index_in_block value. This is semi problematic. There is no problem for the
-    // TransactionTracer that is mutable across the board. But the TransactionTracer is only for the transaction, it does not
-    // contain the block state. We need to hold the latest log index for the block, we would need a deepmind::Context mutable
-    // but we had a hell of a problem dealing with it. Maybe we will need a real BlockTracer that is re-used across the whole
-    // block, that is able to produce correct TransactionTracer from the current block state is could be mutated should enough
-    // to not cause the everywhere trickle down of mutatbility on each element.
-    fn record_log(&mut self, _log: Log) {}
-
     // Those are NOT integrated yet into OpenEthereum, they should work once printed, needs to validate that count match with Geth prior moving it above
-    fn record_gas_refund(&mut self, _gas_old: u64, _gas_refund: u64) {}
-    fn record_gas_consume(&mut self, _gas_old: u64, _gas_consumed: u64, _reason: GasChangeReason) {}
+    fn record_gas_refund(&mut self, _gas_old: usize, _gas_refund: usize) {}
+    fn record_gas_consume(&mut self, _gas_old: usize, _gas_consumed: usize, _reason: GasChangeReason) {}
     fn record_code_change(&mut self, _addr: &eth::Address, _input_hash: &eth::H256, _code_hash: &eth::H256, _old_code: &[u8], _new_code: &[u8]) {}
     fn record_before_call_gas_event(&mut self, _gas_value: u64) {}
     fn record_after_call_gas_event(&mut self, _gas_value: u64) {}
+    // fn record_trx_pool(&mut self, event_type: string, tx *types.Transaction, err error) {}
 
     /// Returns the number of Ethereum Log that was performed as part of this tracer
     fn get_log_count(&self) -> u64 { return 0 }
-    // fn record_trx_pool(&mut self, event_type: string, tx *types.Transaction, err error) {}
 
     fn debug(&mut self, _input: String) {}
 }
@@ -241,15 +236,15 @@ impl Tracer for TransactionTracer {
         ).as_ref());
     }
 
-    fn record_gas_consume(&mut self, gas_old: u64, gas_consumed: u64, reason: GasChangeReason) {
+    fn record_gas_consume(&mut self, gas_old: usize, gas_consumed: usize, reason: GasChangeReason) {
         if gas_consumed != 0 {
-            record_gas_change(&self.printer, self.active_call_index(), gas_old, gas_consumed-gas_consumed, reason);
+            record_gas_change(&self.printer, self.active_call_index(), gas_old as u64, (gas_old as u64)-(gas_consumed as u64), reason);
         }
     }
 
-    fn record_gas_refund(&mut self, gas_old: u64, gas_refund: u64) {
+    fn record_gas_refund(&mut self, gas_old: usize, gas_refund: usize) {
         if gas_refund != 0 {
-            record_gas_change(&self.printer, self.active_call_index(), gas_old, gas_old+gas_refund, GasChangeReason::RefundAfterExecution);
+            record_gas_change(&self.printer, self.active_call_index(), gas_old as u64, (gas_old as u64)+(gas_refund as u64), GasChangeReason::RefundAfterExecution);
         }
     }
 

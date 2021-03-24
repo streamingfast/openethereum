@@ -331,8 +331,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 			state.sub_balance(&params.sender, &val, &mut cleanup_mode(substate, &schedule), deepmind::BalanceChangeReason::Transfer, dm_tracer)?;
 			state.new_contract(&params.address, val.saturating_add(prev_bal), nonce_offset, params.code_version, deepmind::BalanceChangeReason::Transfer, dm_tracer)?;
 		} else {
-			// Deep Mind for now we ignore this call, it's unclear yet if it should be kept ignored or be recorded correctly,
-			// at least, it shows where new contracts are created in eventual fork(s)
+			// Deep Mind for now ignore the balance change reason here, which is most probably the good thing since AFAIK, this is a pure contract creation call
 			state.new_contract(&params.address, prev_bal, nonce_offset, params.code_version, deepmind::BalanceChangeReason::Ignored, dm_tracer)?;
 		}
 
@@ -440,13 +439,14 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 							let mut builtin_output = BytesRef::Flexible(&mut builtin_out_buffer);
 							builtin.execute(data, &mut builtin_output)
 						};
+
+						if dm_tracer.is_enabled() {
+							dm_tracer.record_gas_consume(params.gas.as_usize(), cost.as_usize(), deepmind::GasChangeReason::PrecompiledContract);
+						}
+
 						if let Err(e) = result {
 							if dm_tracer.is_enabled() {
 								dm_tracer.failed_call(&(params.gas - cost), &U256::from(0), &vm::Error::BuiltIn(e).to_string());
-
-								// FIXME: Our Geth instrumentation does NOT emit a EVM_REVERTED here but I think it should, the call was
-								//        not applied thus reverted. But EVM_REVERTED could be there to convey the fact that it was
-								//        explicitely reverted which is not the case here...
 							}
 
 							state.revert_to_checkpoint();
@@ -456,6 +456,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 							state.discard_checkpoint();
 
 							let out_len = builtin_out_buffer.len();
+
 							Ok(FinalizationResult {
 								gas_left: params.gas - cost,
 								return_data: ReturnData::new(builtin_out_buffer, 0, out_len),
@@ -465,10 +466,6 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					} else {
 						if dm_tracer.is_enabled() {
 							dm_tracer.failed_call(&U256::from(0), &U256::from(0), &vm::Error::OutOfGas.to_string());
-
-							// FIXME: Our Geth instrumentation does NOT emit a EVM_REVERTED here but I think it should, the call was
-							//        not applied thus reverted. But EVM_REVERTED could be there to convey the fact that it was
-							//        explicitely reverted which is not the case here...
 						}
 
 						// just drain the whole gas
@@ -718,6 +715,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 										tracer.done_trace_failed(err);
 
 										if dm_tracer.is_enabled() {
+											dm_tracer.record_gas_consume(gas.as_usize(), gas.as_usize(), deepmind::GasChangeReason::FailedExecution);
 											dm_tracer.end_failed_call();
 										}
 									},
@@ -761,6 +759,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 										tracer.done_trace_failed(err);
 
 										if dm_tracer.is_enabled() {
+											dm_tracer.record_gas_consume(gas.as_usize(), gas.as_usize(), deepmind::GasChangeReason::FailedExecution);
 											dm_tracer.end_failed_call();
 										}
 									},
@@ -931,7 +930,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		}
 
 		if dm_tracer.is_enabled() {
-			dm_tracer.record_gas_consume(t.gas.as_u64(), base_gas_required.as_u64(), deepmind::GasChangeReason::IntrinsicGas);
+			dm_tracer.record_gas_consume(t.gas.as_usize(), base_gas_required.as_usize(), deepmind::GasChangeReason::IntrinsicGas);
 		}
 
 		let init_gas = t.gas - base_gas_required;
@@ -1081,6 +1080,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 				tracer.done_trace_failed(err);
 
 				if dm_tracer.is_enabled() {
+					dm_tracer.record_gas_consume(gas.as_usize(), gas.as_usize(), deepmind::GasChangeReason::FailedExecution);
 					dm_tracer.end_failed_call();
 				}
 			},
@@ -1189,6 +1189,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 				tracer.done_trace_failed(err);
 
 				if dm_tracer.is_enabled() {
+					dm_tracer.record_gas_consume(gas.as_usize(), gas.as_usize(), deepmind::GasChangeReason::FailedExecution);
 					dm_tracer.end_failed_call();
 				}
 			},

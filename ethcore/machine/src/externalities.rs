@@ -387,6 +387,11 @@ impl<'a, T: 'a, V: 'a, B: 'a, DM: 'a> Ext<DM> for Externalities<'a, T, V, B, DM>
 						false => Ok(*gas)
 					}
 				}
+
+				if dm_tracer.is_enabled() {
+					dm_tracer.record_gas_consume(gas.as_usize(), return_cost.as_usize(), deepmind::GasChangeReason::CodeStorage);
+				}
+
 				self.state.init_code(&self.origin_info.address, data.to_vec(), dm_tracer)?;
 				Ok(*gas - return_cost)
 			},

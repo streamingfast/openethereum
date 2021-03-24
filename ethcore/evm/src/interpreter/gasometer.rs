@@ -34,10 +34,10 @@ macro_rules! overflowing {
 const PRECOMPILES_ADDRESS_LIMIT: Address = H160([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0xff,0xff]);
 
 enum Request<Cost: ::evm::CostType> {
-	Gas(Cost),
-	GasMem(Cost, Cost),
-	GasMemProvide(Cost, Cost, Option<U256>),
-	GasMemCopy(Cost, Cost, Cost)
+	Gas(Cost, Option<deepmind::GasChangeReason>),
+	GasMem(Cost, Cost, Option<deepmind::GasChangeReason>),
+	GasMemProvide(Cost, Cost, Option<U256>, Option<deepmind::GasChangeReason>),
+	GasMemCopy(Cost, Cost, Cost, Option<deepmind::GasChangeReason>)
 }
 
 pub struct InstructionRequirements<Cost> {
@@ -45,6 +45,7 @@ pub struct InstructionRequirements<Cost> {
 	pub provide_gas: Option<Cost>,
 	pub memory_total_gas: Cost,
 	pub memory_required_size: usize,
+	pub dm_reason: Option<deepmind::GasChangeReason>,
 }
 
 pub struct Gasometer<Gas> {
@@ -120,7 +121,7 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 
 		let cost = match instruction {
 			instructions::JUMPDEST => {
-				Request::Gas(Gas::from(1))
+				Request::Gas(Gas::from(1), None)
 			},
 			instructions::SSTORE => {
 				if schedule.eip1706 && self.current_gas <= Gas::from(schedule.call_stipend) {
@@ -143,19 +144,19 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 						schedule.sstore_reset_gas
 					}
 				};
-				Request::Gas(Gas::from(gas))
+				Request::Gas(Gas::from(gas), None)
 			},
 			instructions::SLOAD => {
-				Request::Gas(Gas::from(schedule.sload_gas))
+				Request::Gas(Gas::from(schedule.sload_gas), None)
 			},
 			instructions::BALANCE => {
-				Request::Gas(Gas::from(schedule.balance_gas))
+				Request::Gas(Gas::from(schedule.balance_gas), None)
 			},
 			instructions::EXTCODESIZE => {
-				Request::Gas(Gas::from(schedule.extcodesize_gas))
+				Request::Gas(Gas::from(schedule.extcodesize_gas), None)
 			},
 			instructions::EXTCODEHASH => {
-				Request::Gas(Gas::from(schedule.extcodehash_gas))
+				Request::Gas(Gas::from(schedule.extcodehash_gas), None)
 			},
 			instructions::SUICIDE => {
 				let mut gas = Gas::from(schedule.suicide_gas);
@@ -170,27 +171,40 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 					gas = overflowing!(gas.overflow_add(schedule.suicide_to_new_account_cost.into()));
 				}
 
-				Request::Gas(gas)
+				Request::Gas(gas, Some(deepmind::GasChangeReason::SelfDestruct))
 			},
 			instructions::MSTORE | instructions::MLOAD => {
-				Request::GasMem(default_gas, mem_needed_const(stack.peek(0), 32)?)
+				Request::GasMem(default_gas, mem_needed_const(stack.peek(0), 32)?, None)
 			},
 			instructions::MSTORE8 => {
-				Request::GasMem(default_gas, mem_needed_const(stack.peek(0), 1)?)
+				Request::GasMem(default_gas, mem_needed_const(stack.peek(0), 1)?, None)
 			},
 			instructions::RETURN | instructions::REVERT => {
-				Request::GasMem(default_gas, mem_needed(stack.peek(0), stack.peek(1))?)
+				let dm_reason = match instruction {
+					instructions::RETURN => Some(deepmind::GasChangeReason::Return),
+					instructions::REVERT => Some(deepmind::GasChangeReason::Revert),
+					_ => None
+				};
+
+				Request::GasMem(default_gas, mem_needed(stack.peek(0), stack.peek(1))?, dm_reason)
 			},
 			instructions::SHA3 => {
 				let words = overflowing!(to_word_size(Gas::from_u256(*stack.peek(1))?));
 				let gas = overflowing!(Gas::from(schedule.sha3_gas).overflow_add(overflowing!(Gas::from(schedule.sha3_word_gas).overflow_mul(words))));
-				Request::GasMem(gas, mem_needed(stack.peek(0), stack.peek(1))?)
+				Request::GasMem(gas, mem_needed(stack.peek(0), stack.peek(1))?, None)
 			},
 			instructions::CALLDATACOPY | instructions::CODECOPY | instructions::RETURNDATACOPY => {
-				Request::GasMemCopy(default_gas, mem_needed(stack.peek(0), stack.peek(2))?, Gas::from_u256(*stack.peek(2))?)
+				let dm_reason = match instruction {
+					instructions::CALLDATACOPY => Some(deepmind::GasChangeReason::CallDataCopy),
+					instructions::CODECOPY => Some(deepmind::GasChangeReason::CodeCopy),
+					instructions::RETURNDATACOPY => Some(deepmind::GasChangeReason::ReturnDataCopy),
+					_ => None
+				};
+
+				Request::GasMemCopy(default_gas, mem_needed(stack.peek(0), stack.peek(2))?, Gas::from_u256(*stack.peek(2))?, dm_reason)
 			},
 			instructions::EXTCODECOPY => {
-				Request::GasMemCopy(schedule.extcodecopy_base_gas.into(), mem_needed(stack.peek(1), stack.peek(3))?, Gas::from_u256(*stack.peek(3))?)
+				Request::GasMemCopy(schedule.extcodecopy_base_gas.into(), mem_needed(stack.peek(1), stack.peek(3))?, Gas::from_u256(*stack.peek(3))?, Some(deepmind::GasChangeReason::ExtCodeCopy))
 			},
 			instructions::LOG0 | instructions::LOG1 | instructions::LOG2 | instructions::LOG3 | instructions::LOG4 => {
 				let no_of_topics = instruction.log_topics().expect("log_topics always return some for LOG* instructions; qed");
@@ -198,7 +212,7 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 
 				let data_gas = overflowing!(Gas::from_u256(*stack.peek(1))?.overflow_mul(Gas::from(schedule.log_data_gas)));
 				let gas = overflowing!(data_gas.overflow_add(Gas::from(log_gas)));
-				Request::GasMem(gas, mem_needed(stack.peek(0), stack.peek(1))?)
+				Request::GasMem(gas, mem_needed(stack.peek(0), stack.peek(1))?, Some(deepmind::GasChangeReason::EventLog))
 			},
 			instructions::CALL | instructions::CALLCODE => {
 				let mut gas = Gas::from(schedule.call_gas);
@@ -223,8 +237,13 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 				}
 
 				let requested = *stack.peek(0);
+				let dm_reason = match instruction {
+					instructions::CALL => Some(deepmind::GasChangeReason::Call),
+					instructions::CALLCODE => Some(deepmind::GasChangeReason::CallCode),
+					_ => None,
+				};
 
-				Request::GasMemProvide(gas, mem, Some(requested))
+				Request::GasMemProvide(gas, mem, Some(requested), dm_reason)
 			},
 			instructions::DELEGATECALL => {
 				let gas = Gas::from(schedule.call_gas);
@@ -234,7 +253,7 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 				);
 				let requested = *stack.peek(0);
 
-				Request::GasMemProvide(gas, mem, Some(requested))
+				Request::GasMemProvide(gas, mem, Some(requested), Some(deepmind::GasChangeReason::DelegateCall))
 			},
 			instructions::STATICCALL => {
 				let code_address = u256_to_address(stack.peek(1));
@@ -251,7 +270,7 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 
 				let requested = *stack.peek(0);
 
-				Request::GasMemProvide(gas, mem, Some(requested))
+				Request::GasMemProvide(gas, mem, Some(requested), Some(deepmind::GasChangeReason::StaticCall))
 			},
 			instructions::CREATE => {
 				let start = stack.peek(1);
@@ -260,7 +279,7 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 				let gas = Gas::from(schedule.create_gas);
 				let mem = mem_needed(start, len)?;
 
-				Request::GasMemProvide(gas, mem, None)
+				Request::GasMemProvide(gas, mem, None, Some(deepmind::GasChangeReason::ContractCreation))
 			},
 			instructions::CREATE2 => {
 				let start = stack.peek(1);
@@ -272,30 +291,31 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 				let gas = overflowing!(base.overflow_add(word_gas));
 				let mem = mem_needed(start, len)?;
 
-				Request::GasMemProvide(gas, mem, None)
+				Request::GasMemProvide(gas, mem, None, Some(deepmind::GasChangeReason::ContractCreation2))
 			},
 			instructions::EXP => {
 				let expon = stack.peek(1);
 				let bytes = ((expon.bits() + 7) / 8) as usize;
 				let gas = Gas::from(schedule.exp_gas + schedule.exp_byte_gas * bytes);
-				Request::Gas(gas)
+				Request::Gas(gas, None)
 			},
 			instructions::BLOCKHASH => {
-				Request::Gas(Gas::from(schedule.blockhash_gas))
+				Request::Gas(Gas::from(schedule.blockhash_gas), None)
 			},
-			_ => Request::Gas(default_gas),
+			_ => Request::Gas(default_gas, None),
 		};
 
 		Ok(match cost {
-			Request::Gas(gas) => {
+			Request::Gas(gas, dm_reason) => {
 				InstructionRequirements {
 					gas_cost: gas,
 					provide_gas: None,
 					memory_required_size: 0,
 					memory_total_gas: self.current_mem_gas,
+					dm_reason,
 				}
 			},
-			Request::GasMem(gas, mem_size) => {
+			Request::GasMem(gas, mem_size, dm_reason) => {
 				let (mem_gas_cost, new_mem_gas, new_mem_size) = self.mem_gas_cost(schedule, current_mem_size, &mem_size)?;
 				let gas = overflowing!(gas.overflow_add(mem_gas_cost));
 				InstructionRequirements {
@@ -303,9 +323,10 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 					provide_gas: None,
 					memory_required_size: new_mem_size,
 					memory_total_gas: new_mem_gas,
+					dm_reason,
 				}
 			},
-			Request::GasMemProvide(gas, mem_size, requested) => {
+			Request::GasMemProvide(gas, mem_size, requested, dm_reason) => {
 				let (mem_gas_cost, new_mem_gas, new_mem_size) = self.mem_gas_cost(schedule, current_mem_size, &mem_size)?;
 				let gas = overflowing!(gas.overflow_add(mem_gas_cost));
 				let provided = self.gas_provided(schedule, gas, requested)?;
@@ -316,9 +337,10 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 					provide_gas: Some(provided),
 					memory_required_size: new_mem_size,
 					memory_total_gas: new_mem_gas,
+					dm_reason,
 				}
 			},
-			Request::GasMemCopy(gas, mem_size, copy) => {
+			Request::GasMemCopy(gas, mem_size, copy, dm_reason) => {
 				let (mem_gas_cost, new_mem_gas, new_mem_size) = self.mem_gas_cost(schedule, current_mem_size, &mem_size)?;
 				let copy = overflowing!(to_word_size(copy));
 				let copy_gas = overflowing!(Gas::from(schedule.copy_gas).overflow_mul(copy));
@@ -330,6 +352,7 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 					provide_gas: None,
 					memory_required_size: new_mem_size,
 					memory_total_gas: new_mem_gas,
+					dm_reason,
 				}
 			},
 		})
