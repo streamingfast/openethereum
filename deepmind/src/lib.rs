@@ -316,11 +316,12 @@ impl Tracer for TransactionTracer {
 		// // The `ctx.nextCallIndex` has not been incremented yet, so we add +1 for the linked call index
         // ctx.printer.Print("GAS_EVENT", ctx.callIndex(), Uint64(ctx.nextCallIndex+1), "before_call", Uint64(gasValue))
         let call_index = self.active_call_index();
+		let for_call_index = self.call_index;
 
         // Matt: Validate against Geth logic, see commented code at top of this implementation
         self.printer.print(format!("GAS_EVENT {call_index} {for_call_index} {reason} {gas_value}",
             call_index = call_index,
-            for_call_index = self.call_index,
+            for_call_index = for_call_index,
             reason = "before_call",
             gas_value = gas_value as u64,
         ).as_ref());

@@ -45,6 +45,7 @@ impl<DM> Finalize<DM> for Result<GasLeft> where DM: deepmind::Tracer {
 	fn finalize<E: Ext<DM>>(self, ext: E, dm_tracer: &mut DM) -> Result<FinalizationResult> {
 		match self {
 			Ok(GasLeft::Known(gas_left)) => {
+				println!("finalize execution KNOWN {:?}", gas_left);
 				Ok(FinalizationResult {
 					gas_left,
 					apply_state: true,
@@ -52,11 +53,15 @@ impl<DM> Finalize<DM> for Result<GasLeft> where DM: deepmind::Tracer {
 				})
 			},
 			Ok(GasLeft::NeedsReturn { gas_left, data, apply_state }) => {
+				println!("finalize execution NEED RETURN {:?} {:?}", gas_left, apply_state);
 				ext.ret(&gas_left, &data, apply_state, dm_tracer).map(|gas_left|
 					FinalizationResult { gas_left, apply_state, return_data: data }
 				)
 			},
-			Err(err) => Err(err),
+			Err(err) => {
+				println!("finalize execution call ERROR {:?}", err);
+				Err(err)
+			},
 		}
 	}
 }

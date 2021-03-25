@@ -350,18 +350,12 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 				| Err(vm::Error::MutableCallInStaticContext)
 				| Err(vm::Error::OutOfBounds)
 				| Err(vm::Error::Reverted) => {
-					if dm_tracer.is_enabled() {
-						// FIXME: This for now never happens in our Battlefield instrumentation testing. However, we should be
-						//        able to test out at least some of them here in Battlefield maybe via some Assembly to ensure
-						//        we have good coverage, the most important part is where to retrieve the gas left in those
-						//        cases ...
-						dm_tracer.reverted_call(&U256::from(987654321));
-					}
 
-					state.revert_to_checkpoint();
+						state.revert_to_checkpoint();
 			},
 			Ok(FinalizationResult { apply_state: false, ref gas_left, .. }) => {
 					if dm_tracer.is_enabled() {
+						println!("call is going to be reverted......2");
 						dm_tracer.reverted_call(gas_left);
 					}
 
@@ -400,6 +394,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 		match self.kind {
 			CallCreateExecutiveKind::Transfer(ref params) => {
 				assert!(!self.is_create);
+				println!("CallCreateExecutiveKind::Transfer");
 
 				let mut inner = || {
 					Self::check_static_flag(params, self.static_flag, self.is_create)?;
@@ -420,6 +415,8 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 			},
 			CallCreateExecutiveKind::CallBuiltin(ref params) => {
 				assert!(!self.is_create);
+				println!("CallCreateExecutiveKind::CallBuiltin");
+
 
 				let mut inner = || {
 					let builtin = self.machine.builtin(&params.code_address, self.info.number).expect("Builtin is_some is checked when creating this kind in new_call_raw; qed");
@@ -433,6 +430,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 
 					// NOTE(niklasad1): block number is used by `builtin alt_bn128 ops` to enable eip1108
 					let cost = builtin.cost(data, self.info.number);
+
 					if cost <= params.gas {
 						let mut builtin_out_buffer = Vec::new();
 						let result = {
@@ -446,11 +444,12 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 
 						if let Err(e) = result {
 							if dm_tracer.is_enabled() {
-								dm_tracer.failed_call(&(params.gas - cost), &U256::from(0), &vm::Error::BuiltIn(e).to_string());
+								let gas_left = (params.gas - cost);
+								dm_tracer.failed_call(&gas_left, &U256::from(0), &vm::Error::BuiltIn(e).to_string());
+								dm_tracer.record_gas_consume(gas_left.as_usize(), U256::from(0).as_usize(), deepmind::GasChangeReason::FailedExecution);
 							}
 
 							state.revert_to_checkpoint();
-
 							Err(vm::Error::BuiltIn(e))
 						} else {
 							state.discard_checkpoint();
@@ -466,6 +465,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					} else {
 						if dm_tracer.is_enabled() {
 							dm_tracer.failed_call(&U256::from(0), &U256::from(0), &vm::Error::OutOfGas.to_string());
+							dm_tracer.record_gas_consume(U256::from(0).as_usize(), U256::from(0).as_usize(), deepmind::GasChangeReason::FailedExecution);
 						}
 
 						// just drain the whole gas
@@ -479,7 +479,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 			},
 			CallCreateExecutiveKind::ExecCall(params, mut unconfirmed_substate) => {
 				assert!(!self.is_create);
-
+				println!("CallCreateExecutiveKind::ExecCall");
 				{
 					let static_flag = self.static_flag;
 					let is_create = self.is_create;
@@ -518,7 +518,24 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 				};
 
 				let res = match out {
-					Ok(val) => val,
+					Ok(val) => {
+						match &val {
+							Err(err) => {
+								println!("error {:?}", err);
+								if *err == vm::Error::OutOfGas {
+									println!("OUT OF GAS {:?}", err);
+									dm_tracer.failed_call(&U256::from(0), &U256::from(0), &vm::Error::OutOfGas.to_string());
+									dm_tracer.record_gas_consume(U256::from(0).as_usize(), U256::from(0).as_usize(), deepmind::GasChangeReason::FailedExecution);
+								} else {
+									println!("Other error {:?}", err);
+									dm_tracer.failed_call(&U256::from(0), &U256::from(0), &vm::Error::OutOfGas.to_string());
+									dm_tracer.record_gas_consume(U256::from(0).as_usize(), U256::from(0).as_usize(), deepmind::GasChangeReason::FailedExecution);
+								}
+							},
+							_ => {}
+						};
+						val
+					},
 					Err(TrapError::Call(subparams, resume)) => {
 						self.kind = CallCreateExecutiveKind::ResumeCall(origin_info, resume, unconfirmed_substate);
 						return Err(TrapError::Call(subparams, self));
@@ -534,6 +551,8 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 			},
 			CallCreateExecutiveKind::ExecCreate(params, mut unconfirmed_substate) => {
 				assert!(self.is_create);
+				println!("CallCreateExecutiveKind::ExecCreate");
+
 
 				{
 					let static_flag = self.static_flag;
@@ -569,7 +588,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 				};
 
 				let res = match out {
-					Ok(val) => val,
+					Ok(val) => { val },
 					Err(TrapError::Call(subparams, resume)) => {
 						self.kind = CallCreateExecutiveKind::ResumeCall(origin_info, resume, unconfirmed_substate);
 						return Err(TrapError::Call(subparams, self));
@@ -667,10 +686,12 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 
 	/// Execute and consume the current executive. This function handles resume traps and sub-level tracing. The caller is expected to handle current-level tracing.
 	pub fn consume<B: 'a + StateBackend, T: Tracer, V: VMTracer>(self, state: &mut State<B>, top_substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_tracer: &mut DM) -> vm::Result<FinalizationResult> {
+		println!("consume firs iteration");
 		let mut last_res = Some((false, self.gas, self.exec(state, top_substate, tracer, vm_tracer, dm_tracer)));
 
 		let mut callstack: Vec<(Option<Address>, CallCreateExecutive<'a, DM>)> = Vec::new();
 		loop {
+			println!("consume loop");
 			match last_res {
 				None => {
 					match callstack.pop() {
@@ -707,15 +728,17 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 											&val.return_data,
 											address
 										);
+										println!("dmlog succesfully executed");
 									},
 									Ok(_) => {
 										tracer.done_trace_failed(&vm::Error::Reverted);
+										println!("dmlog should track reverted");
 									},
 									Err(ref err) => {
 										tracer.done_trace_failed(err);
 
 										if dm_tracer.is_enabled() {
-											dm_tracer.record_gas_consume(gas.as_usize(), gas.as_usize(), deepmind::GasChangeReason::FailedExecution);
+											println!("dmlog end and failed");
 											dm_tracer.end_failed_call();
 										}
 									},
@@ -759,7 +782,6 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 										tracer.done_trace_failed(err);
 
 										if dm_tracer.is_enabled() {
-											dm_tracer.record_gas_consume(gas.as_usize(), gas.as_usize(), deepmind::GasChangeReason::FailedExecution);
 											dm_tracer.end_failed_call();
 										}
 									},
@@ -1079,10 +1101,9 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 			Err(ref err) => {
 				tracer.done_trace_failed(err);
 
-				if dm_tracer.is_enabled() {
-					dm_tracer.record_gas_consume(gas.as_usize(), gas.as_usize(), deepmind::GasChangeReason::FailedExecution);
-					dm_tracer.end_failed_call();
-				}
+				// if dm_tracer.is_enabled() {
+				// 	dm_tracer.end_failed_call();
+				// }
 			},
 		}
 		vm_tracer.done_subtrace();
@@ -1188,10 +1209,9 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 			Err(ref err) => {
 				tracer.done_trace_failed(err);
 
-				if dm_tracer.is_enabled() {
-					dm_tracer.record_gas_consume(gas.as_usize(), gas.as_usize(), deepmind::GasChangeReason::FailedExecution);
-					dm_tracer.end_failed_call();
-				}
+				// if dm_tracer.is_enabled() {
+				// 	dm_tracer.end_failed_call();
+				// }
 			},
 		}
 		vm_tracer.done_subtrace();

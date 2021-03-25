@@ -375,6 +375,17 @@ impl<Cost: CostType> Interpreter<Cost> {
 						dm_tracer.record_before_call_gas_event(current_gas.as_u256().as_usize());
 					}
 
+					println!("DMLOG DEBUG GAS_EVENT CALL {:?} current_gas: {:?} current_gas_mem: {:?} call_gas_cost: {:?} memory_total_gas: {:?} gas_after_call {:?}",
+							 instruction,
+							 current_gas.as_u256(),
+							 current_gas_mem.as_u256(),
+							 requirements.gas_cost.as_u256(),
+							 requirements.memory_total_gas,
+							 (current_gas - requirements.gas_cost).as_u256(),
+					);
+
+
+
 					if dm_reason == deepmind::GasChangeReason::ContractCreation || dm_reason == deepmind::GasChangeReason::ContractCreation2 {
 						dm_tracer.record_gas_consume(current_gas.as_usize(), schedule.create_gas, dm_reason);
 
