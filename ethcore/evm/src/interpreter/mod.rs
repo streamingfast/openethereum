@@ -193,7 +193,22 @@ impl<Cost: 'static + CostType, DM> vm::Exec<DM> for Interpreter<Cost> where DM: 
 			let result = self.step(ext, dm_tracer);
 			match result {
 				InterpreterResult::Continue => {},
-				InterpreterResult::Done(value) => return Ok(value),
+				InterpreterResult::Done(value) => {
+					// DEEPMIND: this is where the call ends whether or not there was an error or not.
+					// If there was an error your Result will either be OK or an Error
+					//	 OK: It will be a GasLeft enum [GasLeft::Known,GasLeft::NeedsReturn]
+					if value.is_err() {
+						match &value {
+							Err(err) => {
+								let gas_left = self.gasometer.as_ref().expect(GASOMETER_PROOF).current_gas.as_u256();
+								dm_tracer.failed_call(&gas_left, &err.to_string());
+							},
+							_ => {}
+						};
+
+					}
+					return Ok(value);
+				},
 				InterpreterResult::Trap(trap) => match trap {
 					TrapKind::Call(params) => {
 						return Err(TrapError::Call(params, self));
@@ -375,16 +390,6 @@ impl<Cost: CostType> Interpreter<Cost> {
 						dm_tracer.record_before_call_gas_event(current_gas.as_u256().as_usize());
 					}
 
-					println!("DMLOG DEBUG GAS_EVENT CALL {:?} current_gas: {:?} current_gas_mem: {:?} call_gas_cost: {:?} memory_total_gas: {:?} gas_after_call {:?}",
-							 instruction,
-							 current_gas.as_u256(),
-							 current_gas_mem.as_u256(),
-							 requirements.gas_cost.as_u256(),
-							 requirements.memory_total_gas,
-							 (current_gas - requirements.gas_cost).as_u256(),
-					);
-
-
 
 					if dm_reason == deepmind::GasChangeReason::ContractCreation || dm_reason == deepmind::GasChangeReason::ContractCreation2 {
 						dm_tracer.record_gas_consume(current_gas.as_usize(), schedule.create_gas, dm_reason);
@@ -400,6 +405,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 
 				self.gasometer.as_mut().expect(GASOMETER_PROOF).current_mem_gas = requirements.memory_total_gas;
 				self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas - requirements.gas_cost;
+
 
 				evm_debug!({ self.informant.before_instruction(self.reader.position, instruction, info, &self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas, &self.stack) });
 

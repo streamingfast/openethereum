@@ -64,7 +64,7 @@ pub trait Tracer: Send {
 
     fn start_call(&mut self, _call: Call) {}
     fn reverted_call(&self, _gas_left: &eth::U256) {}
-    fn failed_call(&mut self, _gas_left: &eth::U256, _gas_left_after_failure: &eth::U256, _err: &String) {}
+    fn failed_call(&mut self, _gas_left_after_failure: &eth::U256, _err: &String) {}
     fn end_call(&mut self, _gas_left: &eth::U256, _return_data: &[u8]) {}
     fn end_failed_call(&mut self) {}
 
@@ -173,7 +173,7 @@ impl Tracer for TransactionTracer {
         ).as_ref());
     }
 
-    fn failed_call(&mut self, gas_left: &eth::U256, gas_left_after_failure: &eth::U256, err: &String) {
+    fn failed_call(&mut self, gas_left: &eth::U256, err: &String) {
         if self.gas_left_after_latest_failure.is_some() {
             panic!("There is already a gas_left_after_latest_failure value set at this point that should have been consumed already")
         }
@@ -184,7 +184,7 @@ impl Tracer for TransactionTracer {
             reason = err,
         ).as_ref());
 
-        self.gas_left_after_latest_failure = Some(*gas_left_after_failure);
+        self.gas_left_after_latest_failure = Some(*gas_left);
     }
 
     fn end_call(&mut self, gas_left: &eth::U256, return_data: &[u8]) {
@@ -203,13 +203,18 @@ impl Tracer for TransactionTracer {
     }
 
     fn end_failed_call(&mut self) {
-        let gas_left = match self.gas_left_after_latest_failure {
+		let gas_left = match self.gas_left_after_latest_failure {
             Some(amount) => amount,
             None => panic!("There should be a gas_left_after_latest_failure value set at this point")
         };
+		self.gas_left_after_latest_failure = None;
 
-        self.gas_left_after_latest_failure = None;
-        self.end_call(&gas_left, &[])
+		// When a failed call occurs, the assumption is that the gas left after the latest
+		// instruction failue is depleted to 0. Note, if the last instruction failed because of an OutOfGas error
+		// we will simply deplete 0 to 0, maybe we should condition this not to happen?
+		// Once the remaining has was consumed we push an end_call with 0 gas left
+		self.record_gas_consume(gas_left.as_usize(), gas_left.as_usize(), GasChangeReason::FailedExecution);
+        self.end_call(&eth::U256::from(0), &[])
     }
 
     fn record_balance_change(&mut self, address: &eth::Address, old: &eth::U256, new: &eth::U256, reason: BalanceChangeReason) {
@@ -321,7 +326,7 @@ impl Tracer for TransactionTracer {
         // Matt: Validate against Geth logic, see commented code at top of this implementation
         self.printer.print(format!("GAS_EVENT {call_index} {for_call_index} {reason} {gas_value}",
             call_index = call_index,
-            for_call_index = for_call_index,
+            for_call_index = for_call_index + 1,
             reason = "before_call",
             gas_value = gas_value as u64,
         ).as_ref());
