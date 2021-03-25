@@ -439,7 +439,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 
 						if let Err(e) = result {
 							if dm_tracer.is_enabled() {
-								let gas_left = (params.gas - cost);
+								let gas_left = params.gas - cost;
 								dm_tracer.failed_call(&gas_left, &vm::Error::BuiltIn(e).to_string());
 							}
 

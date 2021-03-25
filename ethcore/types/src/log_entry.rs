@@ -49,7 +49,7 @@ impl LogEntry {
 		deepmind::Log {
 			address: self.address,
 			topics: &self.topics,
-			data: &self.data as &[u8],
+			data: deepmind::Hex(&self.data as &[u8]),
 		}
 	}
 }

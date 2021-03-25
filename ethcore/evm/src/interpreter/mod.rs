@@ -379,24 +379,24 @@ impl<Cost: CostType> Interpreter<Cost> {
 					let dm_reason = requirements.dm_reason.unwrap();
 					let schedule = ext.schedule();
 
-					// Geth contract creation logs two gas changes sadly, one for the base cost of the OpCode which is
-					// usually 32000 (schedule.gas... here) and another one with the dynamic portion of the op code. We
-					// need to replicate this behavior here, so we compute that gas change in step if required.
+
 					let mut current_gas = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas;
-					let current_gas_mem = self.gasometer.as_ref().expect(GASOMETER_PROOF).current_mem_gas;
 					let mut gas_cost = requirements.gas_cost;
 
 					if self.should_record_gas_event(instruction) {
 						dm_tracer.record_before_call_gas_event(current_gas.as_u256().as_usize());
 					}
 
-
+					// Geth contract creation logs two gas changes sadly, one for the base cost of the OpCode which is
+					// usually 32000 (`schedule.create_gas` here) and another one with the dynamic portion of the op code. We
+					// need to replicate this behavior here, so we compute that gas change in step if required.
 					if dm_reason == deepmind::GasChangeReason::ContractCreation || dm_reason == deepmind::GasChangeReason::ContractCreation2 {
 						dm_tracer.record_gas_consume(current_gas.as_usize(), schedule.create_gas, dm_reason);
 
 						current_gas = current_gas - Cost::from(schedule.create_gas);
 						gas_cost = gas_cost - Cost::from(schedule.create_gas);
 					}
+
 					dm_tracer.record_gas_consume(current_gas.as_usize(), gas_cost.as_usize(), dm_reason);
 				}
 
@@ -491,7 +491,15 @@ impl<Cost: CostType> Interpreter<Cost> {
 
 	// List of opcodes for which we will add a BeforeCall and AfterCall gas events pair
 	fn should_record_gas_event(&self, instruction: Instruction) -> bool {
-		return instruction == instructions::CREATE || instruction == instructions::CREATE2 || instruction == instructions::CALL || instruction == instructions::STATICCALL || instruction == instructions::CALLCODE || instruction == instructions::DELEGATECALL
+		match instruction {
+			instructions::CREATE |
+			instructions::CREATE2 |
+			instructions::CALL |
+			instructions::STATICCALL |
+			instructions::CALLCODE |
+			instructions::DELEGATECALL => true,
+			_ => false
+		}
 	}
 
 	fn verify_instruction<DM>(&self, ext: &dyn vm::Ext<DM>, instruction: Instruction, info: &InstructionInfo) -> vm::Result<()> where DM: deepmind::Tracer {

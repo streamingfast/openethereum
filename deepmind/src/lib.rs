@@ -214,7 +214,7 @@ impl Tracer for TransactionTracer {
 		// we will simply deplete 0 to 0, maybe we should condition this not to happen?
 		// Once the remaining has was consumed we push an end_call with 0 gas left
 		self.record_gas_consume(gas_left.as_usize(), gas_left.as_usize(), GasChangeReason::FailedExecution);
-        self.end_call(&eth::U256::from(0), &[])
+        self.end_call(&eth::U256::from(0), &EMPTY_BYTES)
     }
 
     fn record_balance_change(&mut self, address: &eth::Address, old: &eth::U256, new: &eth::U256, reason: BalanceChangeReason) {
@@ -264,7 +264,7 @@ impl Tracer for TransactionTracer {
             log_index_in_block = self.log_in_block_index,
             address = Address(&log.address),
             topics = topics.join(","),
-            data = Hex(log.data),
+            data = log.data,
         ).as_ref());
 
         self.log_count += 1;
@@ -549,6 +549,7 @@ impl Context {
             context: self,
             is_enabled: self.is_enabled(),
             is_finalize_block_enabled: self.is_finalize_block_enabled(),
+            cumulative_gas_used: 0,
             log_index_at_block: 0,
         }
     }
@@ -570,6 +571,7 @@ pub struct BlockContext<'a> {
     context: &'a Context,
     is_enabled: bool,
     is_finalize_block_enabled: bool,
+    cumulative_gas_used: u64,
     log_index_at_block: u64,
 }
 
@@ -625,14 +627,30 @@ impl<'a> BlockContext<'a> {
         self.log_index_at_block += count;
     }
 
-    pub fn end_transaction(&self, receipt: TransactionReceipt) {
-        self.context.printer.print(format!("END_APPLY_TRX {gas_used} {post_state:x} {cumulative_gas_used} {logs_bloom:x}",
-            gas_used = receipt.gas_used,
-            post_state = H256(&receipt.post_state),
+    pub fn get_cumulative_gas_used(&mut self) -> u64 {
+        self.cumulative_gas_used
+    }
+
+    pub fn set_cumulative_gas_used(&mut self, gas_used: u64) {
+        self.cumulative_gas_used = gas_used;
+    }
+
+    pub fn end_transaction(&mut self, receipt: TransactionReceipt) {
+        let mut post_state_bytes: &[u8] = &EMPTY_BYTES;
+        if !receipt.post_state.is_zero() {
+            post_state_bytes = receipt.post_state.as_bytes();
+        }
+
+        self.context.printer.print(format!("END_APPLY_TRX {gas_used} {post_state:x} {cumulative_gas_used} {logs_bloom:x} {logs}",
+            gas_used = receipt.cumulative_gas_used - self.cumulative_gas_used,
+            // Geth prints this as a Hex while it's really an Hash, let's be consistent with Geth here
+            post_state = Hex(post_state_bytes),
             cumulative_gas_used = receipt.cumulative_gas_used,
             logs_bloom = Hex(receipt.logs_bloom),
-            // 	JSON(logItems),
-        ).as_ref())
+            logs = serde_json::to_string(&receipt.logs).unwrap(),
+        ).as_ref());
+
+        self.cumulative_gas_used = receipt.cumulative_gas_used;
     }
 
     pub fn finalize_block(&self, num: u64) {
@@ -640,16 +658,10 @@ impl<'a> BlockContext<'a> {
     }
 
     pub fn end_block(&self, num: u64, size: u64, header: Header, uncles: Vec<Header>) {
-		let meta = BlockEndMeta{
-			header: header,
-			uncles: uncles
-		};
-		let serialized = serde_json::to_string(&meta).unwrap();
-
 		self.context.printer.print(format!("END_BLOCK {num} {size} {meta}",
             num = num,
             size = size,
-			meta = serialized,
+			meta = serde_json::to_string(&BlockEndMeta{header, uncles}).unwrap(),
         ).as_ref())
     }
 }
@@ -698,14 +710,10 @@ pub struct Transaction<'a> {
 }
 
 pub struct TransactionReceipt<'a> {
-    pub gas_used: u64,
     pub cumulative_gas_used: u64,
     pub post_state: eth::H256,
     pub logs_bloom: &'a [u8],
-
-
-		// 	Hex(receipt.Bloom[:]),
-		// 	JSON(logItems),
+    pub logs: Vec<Log<'a>>,
 }
 
 #[derive(Serialize)]
@@ -722,6 +730,7 @@ pub struct Header<'a> {
 	pub number: U64,
 	pub gas_limit: eth::U256,
 	pub gas_used: eth::U256,
+
 	pub timestamp: U64,
 	pub extra_data: Hex<'a>,
 	// pub mix_hash: eth::H256,
@@ -735,10 +744,12 @@ pub struct BlockEndMeta<'a> {
 	pub uncles: Vec<Header<'a>>
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Log<'a> {
     pub address: eth::Address,
 	pub topics: &'a Vec<eth::H256>,
-	pub data: &'a [u8],
+	pub data: Hex<'a>,
 }
 
 struct Address<'a>(&'a eth::Address);
