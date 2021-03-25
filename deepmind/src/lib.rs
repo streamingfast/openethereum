@@ -625,8 +625,14 @@ impl<'a> BlockContext<'a> {
         self.log_index_at_block += count;
     }
 
-    pub fn end_transaction(&self) {
-        self.context.printer.print(format!("END_APPLY_TRX").as_ref())
+    pub fn end_transaction(&self, receipt: TransactionReceipt) {
+        self.context.printer.print(format!("END_APPLY_TRX {gas_used} {post_state:x} {cumulative_gas_used} {logs_bloom:x}",
+            gas_used = receipt.gas_used,
+            post_state = H256(&receipt.post_state),
+            cumulative_gas_used = receipt.cumulative_gas_used,
+            logs_bloom = Hex(receipt.logs_bloom),
+            // 	JSON(logItems),
+        ).as_ref())
     }
 
     pub fn finalize_block(&self, num: u64) {
@@ -689,6 +695,17 @@ pub struct Transaction<'a> {
     pub nonce: u64,
     pub data: &'a [u8],
     pub signature: (u64, eth::H256, eth::H256),
+}
+
+pub struct TransactionReceipt<'a> {
+    pub gas_used: u64,
+    pub cumulative_gas_used: u64,
+    pub post_state: eth::H256,
+    pub logs_bloom: &'a [u8],
+
+
+		// 	Hex(receipt.Bloom[:]),
+		// 	JSON(logItems),
 }
 
 #[derive(Serialize)]

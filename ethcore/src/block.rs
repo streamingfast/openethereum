@@ -194,7 +194,7 @@ impl<'x> OpenBlock<'x> {
 		}
 
 		if dm_block_context.is_enabled() {
-			dm_block_context.end_transaction();
+			dm_block_context.end_transaction(outcome.receipt.to_deepmind_receipt());
 		}
 
 		self.block.transactions_set.insert(t.hash());

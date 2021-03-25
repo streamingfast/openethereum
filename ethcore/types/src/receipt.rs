@@ -60,6 +60,19 @@ impl Receipt {
 			outcome,
 		}
 	}
+
+	/// Deep Mind data conversion into appropriate type, done like this to avoid dependency cycles between deepmind module and this one
+	pub fn to_deepmind_receipt(&self) -> deepmind::TransactionReceipt {
+		deepmind::TransactionReceipt {
+			gas_used: self.gas_used.as_u64(),
+			cumulative_gas_used: self.gas_used.as_u64(),
+			post_state: match self.outcome {
+				TransactionOutcome::StateRoot(ref hash) => *hash,
+				_ => H256::zero(),
+			},
+			logs_bloom: self.log_bloom.as_bytes(),
+		}
+	}
 }
 
 impl Encodable for Receipt {
