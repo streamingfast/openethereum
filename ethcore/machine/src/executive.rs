@@ -675,8 +675,6 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 							};
 
 							last_res = Some((exec.is_create, exec.gas, exec.exec(state, parent_substate, tracer, vm_tracer, dm_tracer)));
-							println!("LAST RES {:?}", last_res.as_ref().unwrap().2.is_err());
-
 						},
 						None => panic!("When callstack only had one item and it was executed, this function would return; callstack never reaches zero item; qed"),
 					}
