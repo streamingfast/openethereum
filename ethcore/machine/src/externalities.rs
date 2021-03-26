@@ -268,6 +268,14 @@ impl<'a, T: 'a, V: 'a, B: 'a, DM: 'a> Ext<DM> for Externalities<'a, T, V, B, DM>
 			params_type: vm::ParamsType::Embedded,
 		};
 
+		// DEEPMIND: This is the common point that WASM and EVM attempt to execute a sub call, however there is an important difference
+		// 	WASM: will pass trap as `false`, thus calling `ex.create_with_crossbeam` below which in turn executes the sub-call
+		// 	EVM: will pass trap as `true`, this NOT calling `ex.create_with_crossbeam`. The Trap will `Err` will propagate upwards in the code
+		// 	and will be caught by the `CallCreateExecutive.consume` function and will looped on there.
+		if dm_tracer.is_enabled() {
+			dm_tracer.start_call(params.to_deepmind_call());
+		}
+
 		if !self.static_flag {
 			if let Err(e) = self.state.inc_nonce(&self.origin_info.address, dm_tracer) {
 				warn!(target: "ext", "Database corruption encountered: {:?}", e);
@@ -323,6 +331,10 @@ impl<'a, T: 'a, V: 'a, B: 'a, DM: 'a> Ext<DM> for Externalities<'a, T, V, B, DM>
 			action_type: call_type,
 			params_type: vm::ParamsType::Separate,
 		};
+
+		if dm_tracer.is_enabled() {
+			dm_tracer.start_call(params.to_deepmind_call());
+		}
 
 		if let Some(value) = value {
 			params.value = ActionValue::Transfer(value);

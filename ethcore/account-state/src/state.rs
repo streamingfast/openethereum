@@ -409,7 +409,7 @@ impl<B: Backend> State<B> {
 		self.insert_cache(contract, AccountEntry::new_dirty(Some(Account::new_contract(balance, nonce, version, original_storage_root))), dm_tracer);
 
 		if dm_tracer.is_enabled()  {
-			dm_tracer.record_nonce_change(contract, &U256::from(0), &nonce);
+			dm_tracer.record_nonce_change(contract, &U256::from(self.account_start_nonce), &nonce);
 
 			if !balance.is_zero() {
 				dm_tracer.record_balance_change(contract, &U256::from(0), &balance, reason);

@@ -189,6 +189,7 @@ pub struct Interpreter<Cost: CostType> {
 
 impl<Cost: 'static + CostType, DM> vm::Exec<DM> for Interpreter<Cost> where DM: deepmind::Tracer {
 	fn exec(mut self: Box<Self>, ext: &mut dyn vm::Ext<DM>, dm_tracer: &mut DM) -> vm::ExecTrapResult<GasLeft, DM> {
+		dm_tracer.context(&"VM.exec executing call".to_owned());
 		loop {
 			let result = self.step(ext, dm_tracer);
 			match result {
@@ -201,6 +202,8 @@ impl<Cost: 'static + CostType, DM> vm::Exec<DM> for Interpreter<Cost> where DM: 
 						match &value {
 							Err(err) => {
 								let gas_left = self.gasometer.as_ref().expect(GASOMETER_PROOF).current_gas.as_u256();
+								dm_tracer.context(&"VM.exec failed called".to_owned());
+								println!("ERROR GAS LEFT {:?}", gas_left);
 								dm_tracer.failed_call(&gas_left, &err.to_string());
 							},
 							_ => {}
@@ -335,6 +338,9 @@ impl<Cost: CostType> Interpreter<Cost> {
 	/// Inner helper function for step.
 	#[inline(always)]
 	fn step_inner<DM>(&mut self, ext: &mut dyn vm::Ext<DM>, dm_tracer: &mut DM) -> InterpreterResult where DM: deepmind::Tracer {
+		// DEEPMIND: the first step is to check if `resume_result` is SOME.. this will only
+		// be set when we are returning from a sub-call or sub-create which occurs at line 230 & 270 `resume_call`  & `resume_create`
+		let dm_is_resumed_call = self.resume_result.is_some();
 		let result = match self.resume_result.take() {
 			Some(result) => result,
 			None => {
@@ -349,21 +355,28 @@ impl<Cost: CostType> Interpreter<Cost> {
 
 				let instruction = match instruction {
 					Some(i) => i,
-					None => return InterpreterResult::Done(Err(vm::Error::BadInstruction {
-						instruction: opcode
-					})),
+					None => {
+						dm_tracer.context(&"VM.exec call bad instruction".to_owned());
+						return InterpreterResult::Done(Err(vm::Error::BadInstruction {
+							instruction: opcode
+						}));
+					},
 				};
 
 				let info = instruction.info();
 				self.last_stack_ret_len = info.ret;
 				if let Err(e) = self.verify_instruction(ext, instruction, info) {
+					dm_tracer.context(&"VM.exec call verify instruction".to_owned());
 					return InterpreterResult::Done(Err(e));
 				};
 
 				// Calculate gas cost
 				let requirements = match self.gasometer.as_mut().expect(GASOMETER_PROOF).requirements(ext, instruction, info, &self.stack, self.mem.size()) {
 					Ok(t) => t,
-					Err(e) => return InterpreterResult::Done(Err(e)),
+					Err(e) => {
+						dm_tracer.context(&"VM.exec call missing requirements".to_owned());
+						return InterpreterResult::Done(Err(e));
+					},
 				};
 				if self.do_trace {
 					ext.trace_prepare_execute(self.reader.position - 1, opcode, requirements.gas_cost.as_u256(), Self::mem_written(instruction, &self.stack), Self::store_written(instruction, &self.stack));
@@ -372,6 +385,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 					if self.do_trace {
 						ext.trace_failed();
 					}
+					dm_tracer.context(&"VM.exec gas verification failed".to_owned());
 					return InterpreterResult::Done(Err(e));
 				}
 
@@ -385,6 +399,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 
 					if self.should_record_gas_event(instruction) {
 						dm_tracer.record_before_call_gas_event(current_gas.as_u256().as_usize());
+						dm_tracer.context(&"VM.exec calling a sub call".to_owned());
 					}
 
 					// Geth contract creation logs two gas changes sadly, one for the base cost of the OpCode which is
@@ -419,6 +434,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 						if self.do_trace {
 							ext.trace_failed();
 						}
+						dm_tracer.context(&"VM.exec subcall ended with error".to_owned());
 						return InterpreterResult::Done(Err(x));
 					},
 					Ok(x) => x,
@@ -430,6 +446,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 		};
 
 		if let InstructionResult::Trap(trap) = result {
+			dm_tracer.context(&"VM.exec subcall ended with insutrction result trap?".to_owned());
 			return InterpreterResult::Trap(trap);
 		}
 
@@ -440,12 +457,14 @@ impl<Cost: CostType> Interpreter<Cost> {
 
 			}
 			self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas + *gas;
-
-			if dm_tracer.is_enabled() {
-				dm_tracer.record_after_call_gas_event(self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas.as_usize())
-			}
-
 		}
+
+		// if dm_is_resume_call is set, we need to track the gas amount before we resume the parent call
+		if dm_tracer.is_enabled() && dm_is_resumed_call   {
+			dm_tracer.context(&"VM.exec subcall ended with instruction recording after".to_owned());
+			dm_tracer.record_after_call_gas_event(self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas.as_usize())
+		}
+
 
 		if self.do_trace {
 			ext.trace_executed(

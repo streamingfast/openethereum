@@ -62,6 +62,7 @@ pub trait Tracer: Send {
     // Those are done integrating into OpenEthereum code, and they count matched Geth version (still missing 1 - 1 comparison)
     fn is_enabled(&self) -> bool { false }
 
+
     fn start_call(&mut self, _call: Call) {}
     fn reverted_call(&self, _gas_left: &eth::U256) {}
     fn failed_call(&mut self, _gas_left_after_failure: &eth::U256, _err: &String) {}
@@ -95,6 +96,7 @@ pub trait Tracer: Send {
     fn get_log_count(&self) -> u64 { return 0 }
 
     fn debug(&mut self, _input: String) {}
+	fn context(&mut self, _message: &String) {}
 }
 
 pub struct NoopTracer;
@@ -354,6 +356,16 @@ impl Tracer for TransactionTracer {
     fn debug(&mut self, input: String) {
         self.printer.print(&input);
     }
+
+	fn context(&mut self, message: &String) {
+		let active_call_index = self.active_call_index();
+		let last_pop_call_index = self.last_pop_call_index.unwrap_or(0);
+		self.printer.print(format!("CONTEXT active_call_index:{active_call_index} last_pop_call_index:{last_pop_call_index} message:{message}",
+			active_call_index = active_call_index,
+			last_pop_call_index = last_pop_call_index,
+			message = message,
+        ).as_ref());
+	}
 }
 
 impl TransactionTracer {

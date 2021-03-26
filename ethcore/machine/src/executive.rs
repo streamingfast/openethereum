@@ -583,6 +583,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 	///
 	/// Current-level tracing is expected to be handled by caller.
 	pub fn resume_call<B: 'a + StateBackend, T: Tracer, V: VMTracer>(mut self, result: vm::MessageCallResult, state: &mut State<B>, substate: &mut Substate, tracer: &mut T, vm_tracer: &mut V, dm_tracer: &mut DM) -> ExecutiveTrapResult<'a, FinalizationResult, DM> {
+
 		match self.kind {
 			CallCreateExecutiveKind::ResumeCall(origin_info, resume, mut unconfirmed_substate) => {
 				let out = {
@@ -674,6 +675,8 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 							};
 
 							last_res = Some((exec.is_create, exec.gas, exec.exec(state, parent_substate, tracer, vm_tracer, dm_tracer)));
+							println!("LAST RES {:?}", last_res.as_ref().unwrap().2.is_err());
+
 						},
 						None => panic!("When callstack only had one item and it was executed, this function would return; callstack never reaches zero item; qed"),
 					}
@@ -684,7 +687,6 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					match current {
 						Some((address, mut exec)) => {
 							if is_create {
-								println!("we have a create on our hands");
 								let address = address.expect("If the last executed status was from a create executive, then the destination address was pushed to the callstack; address is_some if it is_create; qed");
 
 								if dm_tracer.is_enabled() {
@@ -700,17 +702,13 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 											&val.return_data,
 											address
 										);
-										println!("dmlog succesfully executed");
 									},
 									Ok(_) => {
 										tracer.done_trace_failed(&vm::Error::Reverted);
-										println!("dmlog should track reverted");
 									},
 									Err(ref err) => {
 										tracer.done_trace_failed(err);
-
 										if dm_tracer.is_enabled() {
-											println!("dmlog end and failed");
 											dm_tracer.end_failed_call();
 										}
 									},
@@ -752,7 +750,6 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 									},
 									Err(ref err) => {
 										tracer.done_trace_failed(err);
-
 										if dm_tracer.is_enabled() {
 											dm_tracer.end_failed_call();
 										}
@@ -766,7 +763,6 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 									Some((_, ref mut second_last)) => second_last.unconfirmed_substate().expect("Current stack value is created from second last item; second last item must be call or create; qed"),
 									None => top_substate,
 								};
-
 								last_res = Some((exec.is_create, exec.gas, exec.resume_call(
 									into_message_call_result(val),
 									state,
@@ -782,10 +778,6 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 				},
 				Some((_, _, Err(TrapError::Call(subparams, resume)))) => {
 					let is_builtin = resume.machine.builtin(&subparams.address, resume.info.number).is_some();
-
-					if dm_tracer.is_enabled() {
-						dm_tracer.start_call(subparams.to_deepmind_call());
-					}
 
 					tracer.prepare_trace_call(&subparams, resume.depth + 1, is_builtin);
 					vm_tracer.prepare_subtrace(subparams.code.as_ref().map_or_else(|| &[] as &[u8], |d| &*d as &[u8]));
@@ -806,10 +798,6 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					last_res = None;
 				},
 				Some((_, _, Err(TrapError::Create(subparams, address, resume)))) => {
-					if dm_tracer.is_enabled() {
-						dm_tracer.start_call(subparams.to_deepmind_call());
-					}
-
 					tracer.prepare_trace_create(&subparams);
 					vm_tracer.prepare_subtrace(subparams.code.as_ref().map_or_else(|| &[] as &[u8], |d| &*d as &[u8]));
 
@@ -1033,9 +1021,6 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		vm_tracer: &mut V,
 		dm_tracer: &mut DM,
 	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer, DM: deepmind::Tracer {
-		if dm_tracer.is_enabled() {
-			dm_tracer.start_call(params.to_deepmind_call());
-		}
 
 		tracer.prepare_trace_call(&params, self.depth, self.machine.builtin(&params.address, self.info.number).is_some());
 		vm_tracer.prepare_subtrace(params.code.as_ref().map_or_else(|| &[] as &[u8], |d| &*d as &[u8]));
@@ -1124,6 +1109,11 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		vm_tracer: &mut V,
 		dm_tracer: &mut DM,
 	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer, DM: deepmind::Tracer {
+
+		if dm_tracer.is_enabled() {
+			dm_tracer.start_call(params.to_deepmind_call());
+		}
+
 		self.call_with_stack_depth(params, substate, 0, tracer, vm_tracer, dm_tracer)
 	}
 
@@ -1139,9 +1129,6 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		vm_tracer: &mut V,
 		dm_tracer: &mut DM,
 	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer, DM: deepmind::Tracer {
-		if dm_tracer.is_enabled() {
-			dm_tracer.start_call(params.to_deepmind_call());
-		}
 
 		tracer.prepare_trace_create(&params);
 		vm_tracer.prepare_subtrace(params.code.as_ref().map_or_else(|| &[] as &[u8], |d| &*d as &[u8]));
@@ -1232,6 +1219,11 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		vm_tracer: &mut V,
 		dm_tracer: &mut DM,
 	) -> vm::Result<FinalizationResult> where T: Tracer, V: VMTracer, DM: deepmind::Tracer {
+
+		if dm_tracer.is_enabled() {
+			dm_tracer.start_call(params.to_deepmind_call());
+		}
+
 		self.create_with_stack_depth(params, substate, 0, tracer, vm_tracer, dm_tracer)
 	}
 
