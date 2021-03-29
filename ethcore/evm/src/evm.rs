@@ -52,9 +52,15 @@ impl<DM> Finalize<DM> for Result<GasLeft> where DM: deepmind::Tracer {
 				})
 			},
 			Ok(GasLeft::NeedsReturn { gas_left, data, apply_state }) => {
-				ext.ret(&gas_left, &data, apply_state, dm_tracer).map(|gas_left|
+				let result = ext.ret(&gas_left, &data, apply_state, dm_tracer).map(|gas_left|
 					FinalizationResult { gas_left, apply_state, return_data: data }
-				)
+				);
+
+				if dm_tracer.is_enabled() && result.is_err() {
+					dm_tracer.failed_call(&gas_left, result.as_ref().unwrap_err().to_string());
+				}
+
+				result
 			},
 			Err(err) => {
 				Err(err)

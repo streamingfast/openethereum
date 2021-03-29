@@ -199,7 +199,7 @@ impl<Cost: 'static + CostType, DM> vm::Exec<DM> for Interpreter<Cost> where DM: 
 					//	 OK: It will be a GasLeft enum [GasLeft::Known,GasLeft::NeedsReturn]
 					if dm_tracer.is_enabled() {
 						if let Err(ref err) = value {
-							dm_tracer.failed_call(&self.gasometer.as_ref().expect(GASOMETER_PROOF).current_gas.as_u256(), &err.to_string());
+							dm_tracer.failed_call(&self.gasometer.as_ref().expect(GASOMETER_PROOF).current_gas.as_u256(), err.to_string());
 						}
 					}
 

@@ -64,7 +64,7 @@ pub trait Tracer: Send {
 
     fn start_call(&mut self, _call: Call) {}
     fn reverted_call(&self, _gas_left: &eth::U256) {}
-    fn failed_call(&mut self, _gas_left_after_failure: &eth::U256, _err: &String) {}
+    fn failed_call(&mut self, _gas_left_after_failure: &eth::U256, _err: String) {}
     fn end_call(&mut self, _gas_left: &eth::U256, _return_data: Option<&[u8]>) {}
     fn end_failed_call(&mut self) {}
 
@@ -168,9 +168,9 @@ impl Tracer for TransactionTracer {
         ).as_ref());
     }
 
-    fn failed_call(&mut self, gas_left: &eth::U256, err: &String) {
+    fn failed_call(&mut self, gas_left: &eth::U256, err: String) {
         if self.gas_left_after_latest_failure.is_some() {
-            panic!("There is already a gas_left_after_latest_failure value set at this point that should have been consumed already [{:?}]",self.hash)
+            panic!("There is already a gas_left_after_latest_failure value set at this point that should have been consumed already [{:?}], error is [{:?}]", self.hash, err)
         }
 
         self.printer.print(format!("EVM_CALL_FAILED {call_index} {gas_left} {reason}",
@@ -187,7 +187,7 @@ impl Tracer for TransactionTracer {
             Some(index) => index,
 			None => panic!("There should always be a call in our call index stack [{:?}]",self.hash)
         };
-		
+
         let mut return_bytes: &[u8] = &EMPTY_BYTES;
         if let Some(bytes) = return_data {
             return_bytes = bytes
@@ -205,7 +205,7 @@ impl Tracer for TransactionTracer {
     fn end_failed_call(&mut self) {
 	    let gas_left = match self.gas_left_after_latest_failure {
             Some(amount) => amount,
-            None => panic!("There should be a gas_left_after_latest_failure value set at this point [{:?}]",self.hash)
+            None => panic!("There should be a gas_left_after_latest_failure value set at this point [{:?}]", self.hash)
         };
 		self.gas_left_after_latest_failure = None;
 

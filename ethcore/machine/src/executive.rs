@@ -440,7 +440,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 						if let Err(e) = result {
 							if dm_tracer.is_enabled() {
 								let gas_left = params.gas - cost;
-								dm_tracer.failed_call(&gas_left, &vm::Error::BuiltIn(e).to_string());
+								dm_tracer.failed_call(&gas_left, vm::Error::BuiltIn(e).to_string());
 							}
 
 							state.revert_to_checkpoint();
@@ -458,7 +458,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 						}
 					} else {
 						if dm_tracer.is_enabled() {
-							dm_tracer.failed_call(&U256::from(0), &vm::Error::OutOfGas.to_string());
+							dm_tracer.failed_call(&U256::from(0), vm::Error::OutOfGas.to_string());
 						}
 
 						// just drain the whole gas
