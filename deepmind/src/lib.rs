@@ -3,7 +3,8 @@ use rustc_hex::ToHex;
 use ethereum_types as eth;
 use serde::{Serialize, Serializer};
 
-static EMPTY_BYTES: [u8; 0] = [];
+pub static EMPTY_BYTES: [u8; 0] = [];
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct Config {
     pub enabled: bool,
@@ -59,9 +60,7 @@ impl Printer for IoPrinter {
 }
 
 pub trait Tracer: Send {
-    // Those are done integrating into OpenEthereum code, and they count matched Geth version (still missing 1 - 1 comparison)
     fn is_enabled(&self) -> bool { false }
-
 
     fn start_call(&mut self, _call: Call) {}
     fn reverted_call(&self, _gas_left: &eth::U256) {}
@@ -87,8 +86,9 @@ pub trait Tracer: Send {
     /// Returns the number of Ethereum Log that was performed as part of this tracer
     fn get_log_count(&self) -> u64 { return 0 }
 
-    fn debug(&mut self, _input: String) {}
-	fn context(&mut self, _message: &String) {}
+    /// Use this to add printing statement useful for debugging, the message is printed with the current
+    /// tracer context like active call index and other tracer state information.
+    fn debug(&mut self, _message: String) {}
 }
 
 pub struct NoopTracer;
@@ -343,13 +343,10 @@ impl Tracer for TransactionTracer {
         self.log_count
     }
 
-    fn debug(&mut self, input: String) {
-        self.printer.print(&input);
-    }
-
-	fn context(&mut self, message: &String) {
+    fn debug(&mut self, message: String) {
 		let active_call_index = self.active_call_index();
 		let last_pop_call_index = self.last_pop_call_index.unwrap_or(0);
+
 		self.printer.print(format!("CONTEXT active_call_index:{active_call_index} last_pop_call_index:{last_pop_call_index} message:{message}",
 			active_call_index = active_call_index,
 			last_pop_call_index = last_pop_call_index,
@@ -736,8 +733,8 @@ pub struct Header<'a> {
 
 	pub timestamp: U64,
 	pub extra_data: Hex<'a>,
-	// pub mix_hash: eth::H256,
-	// pub nonce: H256,
+	pub mix_hash: Hex<'a>,
+	pub nonce: Hex<'a>,
 	pub hash: eth::H256,
 }
 

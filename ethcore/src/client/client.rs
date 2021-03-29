@@ -479,11 +479,9 @@ impl Importer {
 		)?;
 
 		if dm_block_context.is_enabled() {
-			let mut uncles : Vec<deepmind::Header> = Vec::new();
-			for u in &locked_block.uncles {
-				uncles.push(u.to_deepmind())
-			}
-			dm_block_context.end_block(header.number(), block_bytes.len() as u64, header.to_deepmind(), uncles);
+			let uncles: Vec<deepmind::Header> = locked_block.uncles.iter().map(|uncle| uncle.to_deepmind_header()).collect();
+
+			dm_block_context.end_block(header.number(), block_bytes.len() as u64, header.to_deepmind_header(), uncles);
 		}
 		Ok((locked_block, pending))
 	}

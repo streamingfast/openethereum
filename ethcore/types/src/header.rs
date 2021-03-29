@@ -22,6 +22,7 @@ use ethereum_types::{H256, U256, Address, Bloom};
 use bytes::Bytes;
 use rlp::{Rlp, RlpStream, Encodable, DecoderError, Decodable};
 use BlockNumber;
+use unexpected::Mismatch;
 
 /// Semantic boolean for when a seal/signature is included.
 #[derive(Debug, Clone, Copy)]
@@ -319,8 +320,8 @@ impl Header {
 	}
 
 	/// Deep Mind data conversion into appropriate type, done like this to avoid dependency cycles between deepmind module and this one
-	pub fn to_deepmind(&self) -> deepmind::Header {
-		deepmind::Header {
+	pub fn to_deepmind_header(&self) -> deepmind::Header {
+		let mut header = deepmind::Header {
 			parent_hash: self.parent_hash,
 			sha3_uncles: self.uncles_hash,
 			miner: self.author,
@@ -334,9 +335,26 @@ impl Header {
 			gas_used: self.gas_used,
 			timestamp: deepmind::U64(self.timestamp),
 			extra_data: deepmind::Hex(&self.extra_data),
+			mix_hash: deepmind::Hex(&deepmind::EMPTY_BYTES),
+			nonce: deepmind::Hex(&deepmind::EMPTY_BYTES),
 			hash: self.hash()
+		};
+
+		if self.seal.len() > 0 {
+			match self.decode_seal::<Vec<_>>() {
+				Err(err) => panic!("Unable to decode block seal but expected to be able to do so, error was {:?}", err),
+				Ok(fields) => {
+					if fields.len() != 2 {
+						panic!("Invalid block seal arity {}", Mismatch {expected: 2, found: fields.len()})
+					}
+
+					header.mix_hash = deepmind::Hex(&fields[0]);
+					header.nonce = deepmind::Hex(&fields[1]);
+				},
+			}
 		}
 
+		header
 	}
 }
 
