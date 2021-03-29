@@ -184,7 +184,7 @@ impl<'x> OpenBlock<'x> {
 			// Required otherwise `get_log_count` from Trait is not in scope for usage here without the `use` clause
 			use self::deepmind::Tracer;
 
-			let mut dm_tracer = dm_block_context.transaction_tracer();
+			let mut dm_tracer = dm_block_context.transaction_tracer(t.hash());
 
 			outcome = self.block.state.apply(&env_info, self.engine.machine(), &t, self.block.traces.is_enabled(), &mut dm_tracer)?;
 

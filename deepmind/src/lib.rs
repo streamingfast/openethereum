@@ -121,6 +121,7 @@ impl Tracer for BlockTracer {
 /// actual call index we are currently at. Aside mutability and state, it delegates all Deep Mind
 /// printing operations to the `Context`.
 pub struct TransactionTracer {
+	hash: eth::H256,
     printer: Arc<Box<dyn Printer>>,
     call_index: u64,
 	last_pop_call_index: Option<u64>,
@@ -169,7 +170,7 @@ impl Tracer for TransactionTracer {
 
     fn failed_call(&mut self, gas_left: &eth::U256, err: &String) {
         if self.gas_left_after_latest_failure.is_some() {
-            panic!("There is already a gas_left_after_latest_failure value set at this point that should have been consumed already")
+            panic!("There is already a gas_left_after_latest_failure value set at this point that should have been consumed already [{:?}]",self.hash)
         }
 
         self.printer.print(format!("EVM_CALL_FAILED {call_index} {gas_left} {reason}",
@@ -184,9 +185,9 @@ impl Tracer for TransactionTracer {
     fn end_call(&mut self, gas_left: &eth::U256, return_data: Option<&[u8]>) {
         let call_index = match self.call_stack.pop() {
             Some(index) => index,
-            None => panic!("There should always be a call in our call index stack")
+			None => panic!("There should always be a call in our call index stack [{:?}]",self.hash)
         };
-
+		
         let mut return_bytes: &[u8] = &EMPTY_BYTES;
         if let Some(bytes) = return_data {
             return_bytes = bytes
@@ -204,7 +205,7 @@ impl Tracer for TransactionTracer {
     fn end_failed_call(&mut self) {
 	    let gas_left = match self.gas_left_after_latest_failure {
             Some(amount) => amount,
-            None => panic!("There should be a gas_left_after_latest_failure value set at this point")
+            None => panic!("There should be a gas_left_after_latest_failure value set at this point [{:?}]",self.hash)
         };
 		self.gas_left_after_latest_failure = None;
 
@@ -325,7 +326,7 @@ impl Tracer for TransactionTracer {
 
     fn record_after_call_gas_event(&mut self, gas_value: usize) {
 		if self.last_pop_call_index.is_none() {
-			panic!("there should always have been a call pop before we print the after call gas event")
+			panic!("there should always have been a call pop before we print the after call gas event [{:?}]",self.hash)
 		}
 		let call_index = self.active_call_index();
 		let for_call_index = self.last_pop_call_index.unwrap();
@@ -589,8 +590,9 @@ impl<'a> BlockContext<'a> {
         self.context.printer.print(format!("BEGIN_BLOCK {num}", num = num).as_ref())
     }
 
-    pub fn transaction_tracer(&self) -> TransactionTracer {
+    pub fn transaction_tracer(&self, hash: eth::H256) -> TransactionTracer {
         TransactionTracer{
+			hash: hash,
             printer: self.context.printer.clone(),
             call_index: 0,
 			last_pop_call_index: None,
