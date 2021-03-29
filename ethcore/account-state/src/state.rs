@@ -654,12 +654,12 @@ impl<B: Backend> State<B> {
 	}
 
 	/// Add `incr` to the balance of account `a`.
-	pub fn add_balance<DM>(&mut self, a: &Address, incr: &U256, cleanup_mode: CleanupMode, reason: deepmind::BalanceChangeReason, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
+	pub fn add_balance<DM>(&mut self, a: &Address, incr: &U256, cleanup_mode: &mut CleanupMode, reason: deepmind::BalanceChangeReason, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
 		trace!(target: "state", "add_balance({}, {}): {}", a, incr, self.balance(a)?);
 		let is_value_transfer = !incr.is_zero();
-		if is_value_transfer || (cleanup_mode == CleanupMode::ForceCreate && !self.exists(a)?) {
+		if is_value_transfer || (*cleanup_mode == CleanupMode::ForceCreate && !self.exists(a)?) {
 			self.require(a, false, dm_tracer)?.add_balance(incr, reason, a, dm_tracer);
-		} else if let CleanupMode::TrackTouched(set) = cleanup_mode {
+		} else if let CleanupMode::TrackTouched(ref mut set) = cleanup_mode {
 			if self.exists(a)? {
 				set.insert(*a);
 				self.touch(a, dm_tracer)?;
@@ -682,8 +682,15 @@ impl<B: Backend> State<B> {
 
 	/// Subtracts `by` from the balance of `from` and adds it to that of `to`.
 	pub fn transfer_balance<DM>(&mut self, from: &Address, to: &Address, by: &U256, mut cleanup_mode: CleanupMode, from_reason: deepmind::BalanceChangeReason, to_reason: deepmind::BalanceChangeReason, dm_tracer: &mut DM) -> TrieResult<()> where DM: deepmind::Tracer {
-		self.sub_balance(from, by, &mut cleanup_mode, from_reason, dm_tracer)?;
-		self.add_balance(to, by, cleanup_mode, to_reason, dm_tracer)?;
+		if dm_tracer.is_enabled() && from_reason == deepmind::BalanceChangeReason::SuicideWithdraw && to_reason == deepmind::BalanceChangeReason::SuicideRefund {
+			// Geth records them in reverse position, so we do the same here, hopefully it will not cause any side-effects
+			self.add_balance(to, by, &mut cleanup_mode, to_reason, dm_tracer)?;
+			self.sub_balance(from, by, &mut cleanup_mode, from_reason, dm_tracer)?;
+		} else {
+			self.sub_balance(from, by, &mut cleanup_mode, from_reason, dm_tracer)?;
+			self.add_balance(to, by, &mut cleanup_mode, to_reason, dm_tracer)?;
+		}
+
 		Ok(())
 	}
 

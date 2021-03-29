@@ -879,7 +879,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		let needed_balance = t.value.saturating_add(t.gas.saturating_mul(t.gas_price));
 		if balance < needed_balance {
 			// give the sender a sufficient balance
-			self.state.add_balance(&sender, &(needed_balance - balance), CleanupMode::NoEmpty, deepmind::BalanceChangeReason::Ignored, dm_tracer)?;
+			self.state.add_balance(&sender, &(needed_balance - balance), &mut CleanupMode::NoEmpty, deepmind::BalanceChangeReason::Ignored, dm_tracer)?;
 		}
 
 		self.transact(t, options, dm_tracer)
@@ -1264,9 +1264,9 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 		let sender = t.sender();
 		trace!(target: "executive", "exec::finalize: Refunding refund_value={}, sender={}\n", refund_value, sender);
 		// Below: NoEmpty is safe since the sender must already be non-null to have sent this transaction
-		self.state.add_balance(&sender, &refund_value, CleanupMode::NoEmpty, deepmind::BalanceChangeReason::GasRefund, dm_tracer)?;
+		self.state.add_balance(&sender, &refund_value, &mut CleanupMode::NoEmpty, deepmind::BalanceChangeReason::GasRefund, dm_tracer)?;
 		trace!(target: "executive", "exec::finalize: Compensating author: fees_value={}, author={}\n", fees_value, &self.info.author);
-		self.state.add_balance(&self.info.author, &fees_value, cleanup_mode(&mut substate, &schedule), deepmind::BalanceChangeReason::RewardTransactionFee, dm_tracer)?;
+		self.state.add_balance(&self.info.author, &fees_value, &mut cleanup_mode(&mut substate, &schedule), deepmind::BalanceChangeReason::RewardTransactionFee, dm_tracer)?;
 
 		// perform suicides
 		for address in &substate.suicides {

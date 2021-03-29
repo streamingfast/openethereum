@@ -401,7 +401,7 @@ impl Machine {
 
 	/// Increment the balance of an account in the state of the live block.
 	pub fn add_balance<DM>(&self, live: &mut ExecutedBlock, address: &Address, amount: &U256, reason: deepmind::BalanceChangeReason, dm_tracer: &mut DM) -> Result<(), Error> where DM: deepmind::Tracer {
-		live.state_mut().add_balance(address, amount, CleanupMode::NoEmpty, reason, dm_tracer).map_err(Into::into)
+		live.state_mut().add_balance(address, amount, &mut CleanupMode::NoEmpty, reason, dm_tracer).map_err(Into::into)
 	}
 }
 

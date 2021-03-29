@@ -332,12 +332,12 @@ impl<'a, T: 'a, V: 'a, B: 'a, DM: 'a> Ext<DM> for Externalities<'a, T, V, B, DM>
 			params_type: vm::ParamsType::Separate,
 		};
 
-		if dm_tracer.is_enabled() {
-			dm_tracer.start_call(params.to_deepmind_call());
-		}
-
 		if let Some(value) = value {
 			params.value = ActionValue::Transfer(value);
+		}
+
+		if dm_tracer.is_enabled() {
+			dm_tracer.start_call(params.to_deepmind_call());
 		}
 
 		if trap {
