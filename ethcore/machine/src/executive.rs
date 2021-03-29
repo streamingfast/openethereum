@@ -689,7 +689,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 
 								if dm_tracer.is_enabled() {
 									if let Ok(ref val) = val {
-										dm_tracer.end_call(&val.gas_left, &val.return_data);
+										dm_tracer.end_call(&val.gas_left, None);
 									}
 								}
 
@@ -732,7 +732,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 							} else {
 								if dm_tracer.is_enabled() {
 									if let Ok(ref val) = val {
-										dm_tracer.end_call(&val.gas_left, &val.return_data);
+										dm_tracer.end_call(&val.gas_left, Some(&val.return_data));
 									};
 								}
 
@@ -1039,7 +1039,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 
 		if dm_tracer.is_enabled() {
 			if let Ok(ref val) = result {
-				dm_tracer.end_call(&val.gas_left, &val.return_data);
+				dm_tracer.end_call(&val.gas_left, Some(&val.return_data));
 			};
 		}
 
@@ -1148,7 +1148,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 
 		if dm_tracer.is_enabled() {
 			if let Ok(ref val) = result {
-				dm_tracer.end_call(&val.gas_left, &val.return_data);
+				dm_tracer.end_call(&val.gas_left, None);
 			};
 		}
 

@@ -66,7 +66,7 @@ pub trait Tracer: Send {
     fn start_call(&mut self, _call: Call) {}
     fn reverted_call(&self, _gas_left: &eth::U256) {}
     fn failed_call(&mut self, _gas_left_after_failure: &eth::U256, _err: &String) {}
-    fn end_call(&mut self, _gas_left: &eth::U256, _return_data: &[u8]) {}
+    fn end_call(&mut self, _gas_left: &eth::U256, _return_data: Option<&[u8]>) {}
     fn end_failed_call(&mut self) {}
 
     fn record_balance_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256, _reason: BalanceChangeReason) {}
@@ -76,21 +76,13 @@ pub trait Tracer: Send {
     fn record_suicide(&mut self, _addr: &eth::Address, _already_suicided: bool, _balance_before_suicide: &eth::U256) {}
     fn record_storage_change(&mut self, _addr: &eth::Address, _key: &eth::H256, _old_data: &eth::H256, _new_data: &eth::H256) {}
     fn record_log(&mut self, _log: Log) {}
-
-    // This one specifically is not quite aligned with Geth mainly on how Geth and OpenEthereum handles
-    // transfer to inexistant account. In this case, Geth does not even generate an EVM call and as such
-    // no account without code event (but it should!) and OpenEthereum does the right thing. Without
-    // changing this, at the very least, the console reader should manually set account without code
-    // when no EVM call is generated, this would ensure we have 1 - 1 Blocks with Geth.
     fn record_call_without_code(&mut self) {}
 
-    // Those are NOT integrated yet into OpenEthereum, they should work once printed, needs to validate that count match with Geth prior moving it above
     fn record_gas_refund(&mut self, _gas_old: usize, _gas_refund: usize) {}
     fn record_gas_consume(&mut self, _gas_old: usize, _gas_consumed: usize, _reason: GasChangeReason) {}
     fn record_code_change(&mut self, _addr: &eth::Address, _input_hash: &eth::H256, _code_hash: &eth::H256, _old_code: &[u8], _new_code: &[u8]) {}
     fn record_before_call_gas_event(&mut self, _gas_value: usize) {}
     fn record_after_call_gas_event(&mut self, _gas_value: usize) {}
-    // fn record_trx_pool(&mut self, event_type: string, tx *types.Transaction, err error) {}
 
     /// Returns the number of Ethereum Log that was performed as part of this tracer
     fn get_log_count(&self) -> u64 { return 0 }
@@ -189,23 +181,28 @@ impl Tracer for TransactionTracer {
         self.gas_left_after_latest_failure = Some(*gas_left);
     }
 
-    fn end_call(&mut self, gas_left: &eth::U256, return_data: &[u8]) {
-       let call_index = match self.call_stack.pop() {
-           Some(index) => index,
-           None => panic!("There should always be a call in our call index stack")
-       };
+    fn end_call(&mut self, gas_left: &eth::U256, return_data: Option<&[u8]>) {
+        let call_index = match self.call_stack.pop() {
+            Some(index) => index,
+            None => panic!("There should always be a call in our call index stack")
+        };
 
-		self.last_pop_call_index = Some(call_index);
+        let mut return_bytes: &[u8] = &EMPTY_BYTES;
+        if let Some(bytes) = return_data {
+            return_bytes = bytes
+        }
 
         self.printer.print(format!("EVM_END_CALL {call_index} {gas_left:} {return_value:x}",
             call_index = call_index,
             gas_left = gas_left.as_u64(),
-            return_value = Hex(return_data),
+            return_value = Hex(return_bytes),
         ).as_ref());
+
+        self.last_pop_call_index = Some(call_index);
     }
 
     fn end_failed_call(&mut self) {
-		let gas_left = match self.gas_left_after_latest_failure {
+	    let gas_left = match self.gas_left_after_latest_failure {
             Some(amount) => amount,
             None => panic!("There should be a gas_left_after_latest_failure value set at this point")
         };
@@ -216,7 +213,7 @@ impl Tracer for TransactionTracer {
 		// we will simply deplete 0 to 0, maybe we should condition this not to happen?
 		// Once the remaining has was consumed we push an end_call with 0 gas left
 		self.record_gas_consume(gas_left.as_usize(), gas_left.as_usize(), GasChangeReason::FailedExecution);
-        self.end_call(&eth::U256::from(0), &EMPTY_BYTES)
+        self.end_call(&eth::U256::from(0), None)
     }
 
     fn record_balance_change(&mut self, address: &eth::Address, old: &eth::U256, new: &eth::U256, reason: BalanceChangeReason) {
@@ -290,14 +287,6 @@ impl Tracer for TransactionTracer {
             already_suicided = already_suicided,
             balance_before_suicide = U256(balance_before_suicide),
         ).as_ref());
-
-        // Matt: I don't think this is required by OpenEthereum since handle differently, needs to be validated
-        // if balanceBeforeSuicide.Sign() != 0 {
-        // 	// We need to explicit add a balance change removing the suicided contract balance since
-        // 	// the remaining balance of the contract has already been resetted to 0 by the time we
-        // 	// do the print call.
-        // 	ctx.RecordBalanceChange(addr, balanceBeforeSuicide, common.Big0, BalanceChangeReason("suicide_withdraw"))
-        // }
     }
 
     fn record_new_account(&mut self, address: &eth::Address) {

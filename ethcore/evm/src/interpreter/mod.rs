@@ -197,17 +197,12 @@ impl<Cost: 'static + CostType, DM> vm::Exec<DM> for Interpreter<Cost> where DM: 
 					// DEEPMIND: this is where the call ends whether or not there was an error or not.
 					// If there was an error your Result will either be OK or an Error
 					//	 OK: It will be a GasLeft enum [GasLeft::Known,GasLeft::NeedsReturn]
-					if value.is_err() {
-						match &value {
-							Err(err) => {
-								let gas_left = self.gasometer.as_ref().expect(GASOMETER_PROOF).current_gas.as_u256();
-								println!("ERROR GAS LEFT {:?}", gas_left);
-								dm_tracer.failed_call(&gas_left, &err.to_string());
-							},
-							_ => {}
-						};
-
+					if dm_tracer.is_enabled() {
+						if let Err(ref err) = value {
+							dm_tracer.failed_call(&self.gasometer.as_ref().expect(GASOMETER_PROOF).current_gas.as_u256(), &err.to_string());
+						}
 					}
+
 					return Ok(value);
 				},
 				InterpreterResult::Trap(trap) => match trap {
@@ -454,7 +449,6 @@ impl<Cost: CostType> Interpreter<Cost> {
 		if dm_tracer.is_enabled() && dm_is_resumed_call   {
 			dm_tracer.record_after_call_gas_event(self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas.as_usize())
 		}
-
 
 		if self.do_trace {
 			ext.trace_executed(
@@ -718,9 +712,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 
 				let call_result = {
 					let input = self.mem.read_slice(in_off, in_size);
-
 					ext.call(&call_gas.as_u256(), sender_address, receive_address, value, input, &code_address, call_type, true, dm_tracer)
-
 				};
 
 				self.resume_output_range = Some((out_off, out_size));
