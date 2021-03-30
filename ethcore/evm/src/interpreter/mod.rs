@@ -334,6 +334,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 		// DEEPMIND: the first step is to check if `resume_result` is SOME.. this will only
 		// be set when we are returning from a sub-call or sub-create which occurs at line 230 & 270 `resume_call`  & `resume_create`
 		let dm_is_resumed_call = self.resume_result.is_some();
+		let mut dm_should_perform_sub_call = false;
 		let result = match self.resume_result.take() {
 			Some(result) => result,
 			None => {
@@ -387,6 +388,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 					let mut gas_cost = requirements.gas_cost;
 
 					if self.should_record_gas_event(instruction) {
+						dm_should_perform_sub_call = true;
 						dm_tracer.record_before_call_gas_event(current_gas.as_u256().as_usize());
 					}
 
@@ -440,6 +442,9 @@ impl<Cost: CostType> Interpreter<Cost> {
 			let gas_old = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas;
 			if dm_tracer.is_enabled() {
 				dm_tracer.record_gas_refund(gas_old.as_usize(), gas.as_usize());
+				if dm_should_perform_sub_call {
+					dm_tracer.record_after_call_gas_event(gas_old.as_usize() +  gas.as_usize())
+				}
 
 			}
 			self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas + *gas;

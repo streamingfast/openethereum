@@ -126,6 +126,7 @@ pub struct TransactionTracer {
     call_index: u64,
 	last_pop_call_index: Option<u64>,
     call_stack: Vec<u64>,
+	gas_event_call_stack: Vec<u64>,
     gas_left_after_latest_failure: Option<eth::U256>,
     log_in_block_index: u64,
     log_count: u64,
@@ -168,6 +169,14 @@ impl Tracer for TransactionTracer {
         ).as_ref());
     }
 
+
+	// gas_left: This is the gas that was left at the point of failure. This value will be depleted once the call has ended
+	// i.e.
+	// 	EVM_RUN_CALL 1 2,000 					// you have 2,000 gas left
+	// 	...
+	// 	EVM_CALL_FAILED 1 1300 Invalid 			// the call used up 700 gas and failed, thus you have left 1300 = 2000 - 7000
+	// 	GAS_CHANGE 1300 0 EVM::Call:Failed 		// once the call is completed we depleted the remaining gas
+	// 	EVM_END_CALL 1
     fn failed_call(&mut self, gas_left: &eth::U256, err: String) {
         if self.gas_left_after_latest_failure.is_some() {
             panic!("There is already a gas_left_after_latest_failure value set at this point that should have been consumed already [{:?}], error is [{:?}]", self.hash, err)
@@ -310,27 +319,25 @@ impl Tracer for TransactionTracer {
     }
 
     fn record_before_call_gas_event(&mut self, gas_value: usize) {
-		// // The `ctx.nextCallIndex` has not been incremented yet, so we add +1 for the linked call index
-        // ctx.printer.Print("GAS_EVENT", ctx.callIndex(), Uint64(ctx.nextCallIndex+1), "before_call", Uint64(gasValue))
         let call_index = self.active_call_index();
-		let for_call_index = self.call_index;
-
+		let for_call_index = self.call_index + 1;
+		self.gas_event_call_stack.push(for_call_index);
         // Matt: Validate against Geth logic, see commented code at top of this implementation
         self.printer.print(format!("GAS_EVENT {call_index} {for_call_index} {reason} {gas_value}",
             call_index = call_index,
-            for_call_index = for_call_index + 1,
+            for_call_index = for_call_index,
             reason = "before_call",
             gas_value = gas_value as u64,
         ).as_ref());
     }
 
     fn record_after_call_gas_event(&mut self, gas_value: usize) {
-		if self.last_pop_call_index.is_none() {
-			panic!("there should always have been a call pop before we print the after call gas event [{:?}]",self.hash)
-		}
 		let call_index = self.active_call_index();
-		let for_call_index = self.last_pop_call_index.unwrap();
-        // Matt: Validate against Geth logic, see commented code at top of this implementation
+		let for_call_index = match self.gas_event_call_stack.pop() {
+			Some(index) => index,
+			None => panic!("There should always be a call in our gas event call start [{:?}]",self.hash)
+		};
+
         self.printer.print(format!("GAS_EVENT {call_index} {for_call_index} {reason} {gas_value}",
             call_index = call_index,
             for_call_index = for_call_index,
@@ -594,6 +601,7 @@ impl<'a> BlockContext<'a> {
             call_index: 0,
 			last_pop_call_index: None,
             call_stack: Vec::with_capacity(16),
+			gas_event_call_stack: Vec::with_capacity(16),
             gas_left_after_latest_failure: None,
             log_in_block_index: self.log_index_at_block,
             log_count: 0,
