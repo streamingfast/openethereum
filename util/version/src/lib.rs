@@ -41,6 +41,16 @@ pub fn platform() -> String {
 	format!("{}", env!("VERGEN_TARGET_TRIPLE"))
 }
 
+
+pub fn to_deepmind_version() -> (String,String,String) {
+	(
+		env!("CARGO_PKG_VERSION_MAJOR").to_string(),
+		env!("CARGO_PKG_VERSION_MINOR").to_string(),
+		env!("CARGO_PKG_VERSION_PATCH").to_string()
+	)
+}
+
+
 /// Get the standard version string for this software.
 pub fn version() -> String {
 	let commit_date = format!("{}", env!("VERGEN_COMMIT_DATE")).replace("-", "");

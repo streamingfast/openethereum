@@ -874,6 +874,7 @@ name = "deepmind"
 version = "0.0.1"
 dependencies = [
  "ethereum-types",
+ "parity-version",
  "rustc-hex 2.1.0",
  "serde",
  "serde_json",

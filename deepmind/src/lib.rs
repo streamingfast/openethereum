@@ -3,8 +3,14 @@ use rustc_hex::ToHex;
 use ethereum_types as eth;
 use serde::{Serialize, Serializer};
 use ethereum_types::H64;
+use parity_version::{ to_deepmind_version };
 
 pub static EMPTY_BYTES: [u8; 0] = [];
+pub static PLATFORM: &str = "openethereum";
+pub static FORK: &str = "vanilla";
+pub static PROTOCOL_MAJOR: u64 = 1;
+pub static PROTOCOL_MINOR: u64 = 0;
+
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Config {
@@ -572,6 +578,20 @@ impl Context {
     pub fn is_finalize_block_enabled(&self) -> bool {
         return self.instrumentation == Instrumentation::Full || self.instrumentation == Instrumentation::BlockProgress;
     }
+
+	pub fn init(&self, engine: String) {
+		let platform_version = to_deepmind_version();
+		self.printer.print(format!("INIT {protocol_major} {protocol_minor} {platform} {fork} {platform_major} {platform_minor} {platform_patch} {engine}",
+			protocol_major = PROTOCOL_MAJOR,
+			protocol_minor = PROTOCOL_MINOR,
+			platform_major = platform_version.0,
+			platform_minor = platform_version.1,
+			platform_patch = platform_version.2,
+			platform = PLATFORM,
+			fork = FORK,
+			engine = engine,
+		).as_ref())
+	}
 }
 
 pub struct BlockContext<'a> {

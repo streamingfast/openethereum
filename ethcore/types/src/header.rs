@@ -321,7 +321,7 @@ impl Header {
 
 	/// Deep Mind data conversion into appropriate type, done like this to avoid dependency cycles between deepmind module and this one
 	pub fn to_deepmind_header(&self) -> deepmind::Header {
-		let mut header = deepmind::Header {
+		let header = deepmind::Header {
 			parent_hash: self.parent_hash,
 			sha3_uncles: self.uncles_hash,
 			miner: self.author,
@@ -337,25 +337,23 @@ impl Header {
 			extra_data: deepmind::Hex(&self.extra_data),
 			mix_hash: H256::default(),
 			nonce: H64::default(),
-			// mix_hash: deepmind::Hex(&deepmind::EMPTY_BYTES),
-			// nonce: deepmind::Hex(&deepmind::EMPTY_BYTES),
 			hash: self.hash()
 		};
 
 
-		if self.seal.len() > 0 {
-			match self.decode_seal::<Vec<_>>() {
-				Err(err) => panic!("Unable to decode block seal but expected to be able to do so, error was {:?}", err),
-				Ok(fields) => {
-					if fields.len() != 2 {
-						panic!("Invalid block seal arity {}", Mismatch {expected: 2, found: fields.len()})
-					}
-
-					header.mix_hash = H256::from_slice(fields[0]);
-					header.nonce = H64::from_slice(fields[1]);
-				},
-			}
-		}
+		// if self.seal.len() > 0 {
+		// 	match self.decode_seal::<Vec<_>>() {
+		// 		Err(err) => panic!("Unable to decode block seal but expected to be able to do so, error was {:?}", err),
+		// 		Ok(fields) => {
+		// 			if fields.len() != 2 {
+		// 				panic!("Invalid block seal arity {}", Mismatch {expected: 2, found: fields.len()})
+		// 			}
+		//
+		// 			header.mix_hash = H256::from_slice(fields[0]);
+		// 			header.nonce = H64::from_slice(fields[1]);
+		// 		},
+		// 	}
+		// }
 
 		header
 	}

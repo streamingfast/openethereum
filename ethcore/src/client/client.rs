@@ -808,6 +808,10 @@ impl Client {
 			_ => deepmind::Context::noop(),
 		};
 
+		if dm_context.is_enabled() {
+			// dm_context.init(engine.name().to_owned());
+		}
+
 		let client = Arc::new(Client {
 			enabled: AtomicBool::new(true),
 			sleep_state: Mutex::new(SleepState::new(awake)),
