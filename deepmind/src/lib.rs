@@ -2,6 +2,7 @@ use std::{fmt, sync::Arc};
 use rustc_hex::ToHex;
 use ethereum_types as eth;
 use serde::{Serialize, Serializer};
+use ethereum_types::H64;
 
 pub static EMPTY_BYTES: [u8; 0] = [];
 
@@ -665,7 +666,7 @@ impl<'a> BlockContext<'a> {
         self.context.printer.print(format!("FINALIZE_BLOCK {num}", num = num).as_ref())
     }
 
-    pub fn end_block(&self, num: u64, size: u64, header: Header, uncles: Vec<Header>) {
+    pub fn end_block(&self, num: u64, size: u64, mut header:  Header, uncles: Vec<Header>) {
 		self.context.printer.print(format!("END_BLOCK {num} {size} {meta}",
             num = num,
             size = size,
@@ -741,8 +742,8 @@ pub struct Header<'a> {
 
 	pub timestamp: U64,
 	pub extra_data: Hex<'a>,
-	pub mix_hash: Hex<'a>,
-	pub nonce: Hex<'a>,
+	pub mix_hash: eth::H256,
+	pub nonce: eth::H64,
 	pub hash: eth::H256,
 }
 

@@ -18,7 +18,7 @@
 
 use hash::{KECCAK_NULL_RLP, KECCAK_EMPTY_LIST_RLP, keccak};
 use parity_util_mem::MallocSizeOf;
-use ethereum_types::{H256, U256, Address, Bloom};
+use ethereum_types::{H256, U256, Address, Bloom, H64};
 use bytes::Bytes;
 use rlp::{Rlp, RlpStream, Encodable, DecoderError, Decodable};
 use BlockNumber;
@@ -335,10 +335,13 @@ impl Header {
 			gas_used: self.gas_used,
 			timestamp: deepmind::U64(self.timestamp),
 			extra_data: deepmind::Hex(&self.extra_data),
-			mix_hash: deepmind::Hex(&deepmind::EMPTY_BYTES),
-			nonce: deepmind::Hex(&deepmind::EMPTY_BYTES),
+			mix_hash: H256::default(),
+			nonce: H64::default(),
+			// mix_hash: deepmind::Hex(&deepmind::EMPTY_BYTES),
+			// nonce: deepmind::Hex(&deepmind::EMPTY_BYTES),
 			hash: self.hash()
 		};
+
 
 		if self.seal.len() > 0 {
 			match self.decode_seal::<Vec<_>>() {
@@ -348,8 +351,8 @@ impl Header {
 						panic!("Invalid block seal arity {}", Mismatch {expected: 2, found: fields.len()})
 					}
 
-					header.mix_hash = deepmind::Hex(&fields[0]);
-					header.nonce = deepmind::Hex(&fields[1]);
+					header.mix_hash = H256::from_slice(fields[0]);
+					header.nonce = H64::from_slice(fields[1]);
 				},
 			}
 		}
