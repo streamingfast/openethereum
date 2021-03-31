@@ -469,7 +469,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 				// The CallBuiltin inner could have recorded a failed_call already, so we need to ensure it's not set already
 				if dm_tracer.is_enabled() && !dm_tracer.seen_failed_call() {
 					if let Err(ref err) = inner_result {
-						dm_tracer.failed_call(&U256::from(0), err.to_string());
+						dm_tracer.failed_call(&params.gas, err.to_string());
 					}
 				}
 
@@ -498,7 +498,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 						Ok(()) => (),
 						Err(err) => {
 							if dm_tracer.is_enabled() {
-								dm_tracer.failed_call(&U256::from(0), err.to_string());
+								dm_tracer.failed_call(&params.gas, err.to_string());
 							}
 
 							return Ok(Err(err))
@@ -506,6 +506,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					}
 				}
 
+				let dm_call_gas = params.gas;
 				let origin_info = OriginInfo::from(&params);
 				let exec = self.factory.create(params, self.schedule, self.depth);
 
@@ -519,7 +520,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					},
 					None => {
 						if dm_tracer.is_enabled() {
-							dm_tracer.failed_call(&U256::from(0), vm::Error::OutOfGas.to_string());
+							dm_tracer.failed_call(&dm_call_gas, vm::Error::OutOfGas.to_string());
 						}
 
 						Ok(Err(vm::Error::OutOfGas))
@@ -561,7 +562,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 						Ok(()) => (),
 						Err(err) => {
 							if dm_tracer.is_enabled() {
-								dm_tracer.failed_call(&U256::from(0), err.to_string());
+								dm_tracer.failed_call(&params.gas, err.to_string());
 							}
 
 							return Ok(Err(err))
@@ -569,6 +570,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					}
 				}
 
+				let dm_call_gas = params.gas;
 				let origin_info = OriginInfo::from(&params);
 				let exec = self.factory.create(params, self.schedule, self.depth);
 
@@ -582,7 +584,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					},
 					None => {
 						if dm_tracer.is_enabled() {
-							dm_tracer.failed_call(&U256::from(0), vm::Error::OutOfGas.to_string());
+							dm_tracer.failed_call(&dm_call_gas, vm::Error::OutOfGas.to_string());
 						}
 
 						Ok(Err(vm::Error::OutOfGas))

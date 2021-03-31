@@ -146,7 +146,7 @@ pub struct TransactionTracer {
 	last_pop_call_index: Option<u64>,
     call_stack: Vec<u64>,
 	gas_event_call_stack: Vec<u64>,
-    gas_left_after_latest_failure: Option<eth::U256>,
+    active_gas_left_at_failure: Option<eth::U256>,
     log_in_block_index: u64,
     log_count: u64,
 }
@@ -196,18 +196,18 @@ impl Tracer for TransactionTracer {
 	// 	EVM_CALL_FAILED 1 1300 Invalid 			// the call used up 700 gas and failed, thus you have left 1300 = 2000 - 7000
 	// 	GAS_CHANGE 1300 0 EVM::Call:Failed 		// once the call is completed we depleted the remaining gas
 	// 	EVM_END_CALL 1
-    fn failed_call(&mut self, gas_left: &eth::U256, err: String) {
-        if self.gas_left_after_latest_failure.is_some() {
-            panic!("There is already a gas_left_after_latest_failure value set at this point that should have been consumed already [{:?}], error is [{:?}]", self.hash, err)
+    fn failed_call(&mut self, gas_left_at_failure: &eth::U256, err: String) {
+        if self.active_gas_left_at_failure.is_some() {
+            panic!("There is already a active_gas_left_at_failure value set at this point that should have been consumed already [{:?}], error is [{:?}]", self.hash, err)
         }
 
         self.printer.print(format!("EVM_CALL_FAILED {call_index} {gas_left} {reason}",
             call_index = self.active_call_index(),
-            gas_left = gas_left.as_u64(),
+            gas_left = gas_left_at_failure.as_u64(),
             reason = err,
         ).as_ref());
 
-        self.gas_left_after_latest_failure = Some(*gas_left);
+        self.active_gas_left_at_failure = Some(*gas_left_at_failure);
     }
 
     fn end_call(&mut self, gas_left: &eth::U256, return_data: Option<&[u8]>) {
@@ -231,21 +231,21 @@ impl Tracer for TransactionTracer {
     }
 
     fn seen_failed_call(&mut self) -> bool {
-        self.gas_left_after_latest_failure.is_some()
+        self.active_gas_left_at_failure.is_some()
     }
 
     fn end_failed_call(&mut self, from: &str) {
-	    let gas_left = match self.gas_left_after_latest_failure {
+	    let gas_left_at_failure = match self.active_gas_left_at_failure {
             Some(amount) => amount,
-            None => panic!("There should be a gas_left_after_latest_failure value set at {} [{:?}]", from, self.hash)
+            None => panic!("There should be a active_gas_left_at_failure value set at {} [{:?}]", from, self.hash)
         };
-		self.gas_left_after_latest_failure = None;
+		self.active_gas_left_at_failure = None;
 
 		// When a failed call occurs, the assumption is that the gas left after the latest
 		// instruction failue is depleted to 0. Note, if the last instruction failed because of an OutOfGas error
 		// we will simply deplete 0 to 0, maybe we should condition this not to happen?
 		// Once the remaining has was consumed we push an end_call with 0 gas left
-		self.record_gas_consume(gas_left.as_usize(), gas_left.as_usize(), GasChangeReason::FailedExecution);
+		self.record_gas_consume(gas_left_at_failure.as_usize(), gas_left_at_failure.as_usize(), GasChangeReason::FailedExecution);
         self.end_call(&eth::U256::from(0), None)
     }
 
@@ -639,7 +639,7 @@ impl<'a> BlockContext<'a> {
 			last_pop_call_index: None,
             call_stack: Vec::with_capacity(16),
 			gas_event_call_stack: Vec::with_capacity(16),
-            gas_left_after_latest_failure: None,
+            active_gas_left_at_failure: None,
             log_in_block_index: self.log_index_at_block,
             log_count: 0,
         }
