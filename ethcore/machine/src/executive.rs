@@ -457,10 +457,6 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 							})
 						}
 					} else {
-						if dm_tracer.is_enabled() {
-							dm_tracer.failed_call(&U256::from(0), vm::Error::OutOfGas.to_string());
-						}
-
 						// just drain the whole gas
 						state.revert_to_checkpoint();
 
@@ -468,7 +464,16 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					}
 				};
 
-				Ok(inner())
+				let inner_result = inner();
+
+				// The CallBuiltin inner could have recorded a failed_call already, so we need to ensure it's not set already
+				if dm_tracer.is_enabled() && !dm_tracer.seen_failed_call() {
+					if let Err(ref err) = inner_result {
+						dm_tracer.failed_call(&U256::from(0), err.to_string());
+					}
+				}
+
+				Ok(inner_result)
 			},
 			CallCreateExecutiveKind::ExecCall(params, mut unconfirmed_substate) => {
 				assert!(!self.is_create);
@@ -477,7 +482,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					let is_create = self.is_create;
 					let schedule = self.schedule;
 
-					let mut pre_inner = || {
+					let mut pre_inner = || -> vm::Result<()> {
 						Self::check_static_flag(&params, static_flag, is_create)?;
 						state.checkpoint();
 						Self::transfer_exec_balance(&params, schedule, state, substate, dm_tracer)?;
@@ -491,7 +496,13 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 
 					match pre_inner() {
 						Ok(()) => (),
-						Err(err) => return Ok(Err(err)),
+						Err(err) => {
+							if dm_tracer.is_enabled() {
+								dm_tracer.failed_call(&U256::from(0), err.to_string());
+							}
+
+							return Ok(Err(err))
+						},
 					}
 				}
 
@@ -506,7 +517,13 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 							Err(err) => Err(err),
 						}
 					},
-					None => Ok(Err(vm::Error::OutOfGas)),
+					None => {
+						if dm_tracer.is_enabled() {
+							dm_tracer.failed_call(&U256::from(0), vm::Error::OutOfGas.to_string());
+						}
+
+						Ok(Err(vm::Error::OutOfGas))
+					},
 				};
 
 				let res = match out {
@@ -532,7 +549,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 					let is_create = self.is_create;
 					let schedule = self.schedule;
 
-					let mut pre_inner = || {
+					let mut pre_inner = || -> vm::Result<()> {
 						Self::check_eip684(&params, state)?;
 						Self::check_static_flag(&params, static_flag, is_create)?;
 						state.checkpoint();
@@ -542,7 +559,13 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 
 					match pre_inner() {
 						Ok(()) => (),
-						Err(err) => return Ok(Err(err)),
+						Err(err) => {
+							if dm_tracer.is_enabled() {
+								dm_tracer.failed_call(&U256::from(0), err.to_string());
+							}
+
+							return Ok(Err(err))
+						},
 					}
 				}
 
@@ -557,7 +580,13 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 							Err(err) => Err(err),
 						}
 					},
-					None => Ok(Err(vm::Error::OutOfGas)),
+					None => {
+						if dm_tracer.is_enabled() {
+							dm_tracer.failed_call(&U256::from(0), vm::Error::OutOfGas.to_string());
+						}
+
+						Ok(Err(vm::Error::OutOfGas))
+					},
 				};
 
 				let res = match out {
@@ -707,7 +736,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 									Err(ref err) => {
 										tracer.done_trace_failed(err);
 										if dm_tracer.is_enabled() {
-											dm_tracer.end_failed_call("consume_create".to_string());
+											dm_tracer.end_failed_call("consume_create");
 										}
 									},
 								}
@@ -749,7 +778,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 									Err(ref err) => {
 										tracer.done_trace_failed(err);
 										if dm_tracer.is_enabled() {
-											dm_tracer.end_failed_call("consume_call".to_string());
+											dm_tracer.end_failed_call("consume_call");
 										}
 									},
 								}
@@ -1057,7 +1086,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 				tracer.done_trace_failed(err);
 
 				if dm_tracer.is_enabled() {
-					dm_tracer.end_failed_call("call".to_string());
+					dm_tracer.end_failed_call("call");
 				}
 			},
 		}
@@ -1167,7 +1196,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 				tracer.done_trace_failed(err);
 
 				if dm_tracer.is_enabled() {
-					dm_tracer.end_failed_call("create".to_string());
+					dm_tracer.end_failed_call("create");
 				}
 			},
 		}

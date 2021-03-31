@@ -78,7 +78,7 @@ impl From<ethjson::vm::Call> for CallCreate {
 struct TestExt<'a, T: 'a, V: 'a, B: 'a>
 	where T: Tracer, V: VMTracer, B: StateBackend
 {
-	ext: Externalities<'a, T, V, B>,
+	ext: Externalities<'a, T, V, B, deepmind::NoopTracer>,
 	callcreates: Vec<CallCreate>,
 	nonce: U256,
 	sender: Address,
@@ -103,14 +103,14 @@ impl<'a, T: 'a, V: 'a, B: 'a> TestExt<'a, T, V, B>
 		let static_call = false;
 		Ok(TestExt {
 			nonce: state.nonce(&address)?,
-			ext: Externalities::new(state, info, machine, schedule, depth, 0, origin_info, substate, output, tracer, vm_tracer, static_call, deepmind::NoopTracer),
+			ext: Externalities::new(state, info, machine, schedule, depth, 0, origin_info, substate, output, tracer, vm_tracer, static_call),
 			callcreates: vec![],
 			sender: address,
 		})
 	}
 }
 
-impl<'a, T: 'a, V: 'a, B: 'a> Ext for TestExt<'a, T, V, B>
+impl<'a, T: 'a, V: 'a, B: 'a> Ext<deepmind::NoopTracer> for TestExt<'a, T, V, B>
 	where T: Tracer, V: VMTracer, B: StateBackend
 {
 	fn storage_at(&self, key: &H256) -> vm::Result<H256> {
@@ -121,8 +121,8 @@ impl<'a, T: 'a, V: 'a, B: 'a> Ext for TestExt<'a, T, V, B>
 		self.ext.initial_storage_at(key)
 	}
 
-	fn set_storage(&mut self, key: H256, value: H256) -> vm::Result<()> {
-		self.ext.set_storage(key, value)
+	fn set_storage(&mut self, key: H256, value: H256, dm_tracer: &mut deepmind::NoopTracer) -> vm::Result<()> {
+		self.ext.set_storage(key, value, dm_tracer)
 	}
 
 	fn exists(&self, address: &Address) -> vm::Result<bool> {
@@ -141,8 +141,8 @@ impl<'a, T: 'a, V: 'a, B: 'a> Ext for TestExt<'a, T, V, B>
 		self.ext.origin_balance()
 	}
 
-	fn blockhash(&mut self, number: &U256) -> H256 {
-		self.ext.blockhash(number)
+	fn blockhash(&mut self, number: &U256, dm_tracer: &mut deepmind::NoopTracer) -> H256 {
+		self.ext.blockhash(number, dm_tracer)
 	}
 
 	fn create(
@@ -152,7 +152,8 @@ impl<'a, T: 'a, V: 'a, B: 'a> Ext for TestExt<'a, T, V, B>
 		code: &[u8],
 		_code_version: &U256,
 		address: CreateContractAddress,
-		_trap: bool
+		_trap: bool,
+		_dm_tracer: &mut deepmind::NoopTracer
 	) -> Result<ContractCreateResult, vm::TrapKind> {
 		self.callcreates.push(CallCreate {
 			data: code.to_vec(),
@@ -173,7 +174,8 @@ impl<'a, T: 'a, V: 'a, B: 'a> Ext for TestExt<'a, T, V, B>
 		data: &[u8],
 		_code_address: &Address,
 		_call_type: ActionType,
-		_trap: bool
+		_trap: bool,
+		_dm_tracer: &mut deepmind::NoopTracer
 	) -> Result<MessageCallResult, vm::TrapKind> {
 		self.callcreates.push(CallCreate {
 			data: data.to_vec(),
@@ -196,15 +198,15 @@ impl<'a, T: 'a, V: 'a, B: 'a> Ext for TestExt<'a, T, V, B>
 		self.ext.extcodehash(address)
 	}
 
-	fn log(&mut self, topics: Vec<H256>, data: &[u8]) -> vm::Result<()> {
-		self.ext.log(topics, data)
+	fn log(&mut self, topics: Vec<H256>, data: &[u8], dm_tracer: &mut deepmind::NoopTracer) -> vm::Result<()> {
+		self.ext.log(topics, data, dm_tracer)
 	}
 
-	fn ret(self, gas: &U256, data: &ReturnData, apply_state: bool) -> Result<U256, vm::Error> {
-		self.ext.ret(gas, data, apply_state)
+	fn ret(self, gas: &U256, data: &ReturnData, apply_state: bool, dm_tracer: &mut deepmind::NoopTracer) -> Result<U256, vm::Error> {
+		self.ext.ret(gas, data, apply_state, dm_tracer)
 	}
 
-	fn suicide<DM>(&mut self, refund_address: &Address, dm_tracer: &mut DM) -> vm::Result<()> where DM: deepmind::Tracer {
+	fn suicide(&mut self, refund_address: &Address, dm_tracer: &mut deepmind::NoopTracer) -> vm::Result<()> {
 		self.ext.suicide(refund_address, dm_tracer)
 	}
 
@@ -288,7 +290,7 @@ fn do_json_test<H: FnMut(&str, HookType)>(
 
 		// execute
 		let (res, callcreates) = {
-			let schedule = machine.schedule(info.number);
+			let schedule = machine.schedule();
 			let mut ex = try_fail!(TestExt::new(
 				&mut state,
 				&info,

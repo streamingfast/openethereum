@@ -84,7 +84,8 @@ pub trait Tracer: Send {
     fn reverted_call(&self, _gas_left: &eth::U256) {}
     fn failed_call(&mut self, _gas_left_after_failure: &eth::U256, _err: String) {}
     fn end_call(&mut self, _gas_left: &eth::U256, _return_data: Option<&[u8]>) {}
-    fn end_failed_call(&mut self, _from: String) {}
+    fn seen_failed_call(&mut self) -> bool { return false }
+    fn end_failed_call(&mut self, _from: &str) {}
 
     fn record_balance_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256, _reason: BalanceChangeReason) {}
     fn record_nonce_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256) {}
@@ -229,7 +230,11 @@ impl Tracer for TransactionTracer {
         self.last_pop_call_index = Some(call_index);
     }
 
-    fn end_failed_call(&mut self, from: String) {
+    fn seen_failed_call(&mut self) -> bool {
+        self.gas_left_after_latest_failure.is_some()
+    }
+
+    fn end_failed_call(&mut self, from: &str) {
 	    let gas_left = match self.gas_left_after_latest_failure {
             Some(amount) => amount,
             None => panic!("There should be a gas_left_after_latest_failure value set at {} [{:?}]", from, self.hash)

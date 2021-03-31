@@ -189,16 +189,6 @@ pub struct Interpreter<Cost: CostType> {
 
 impl<Cost: 'static + CostType, DM> vm::Exec<DM> for Interpreter<Cost> where DM: deepmind::Tracer {
 	fn exec(mut self: Box<Self>, ext: &mut dyn vm::Ext<DM>, dm_tracer: &mut DM) -> vm::ExecTrapResult<GasLeft, DM> {
-		if dm_tracer.is_enabled() {
-			let gasometer = self.gasometer.as_ref();
-			let mut gas = 0 as u64;
-			if  gasometer.is_some() {
-				gas = gasometer.unwrap().current_gas.as_u256().as_u64();
-			}
-
-			dm_tracer.debug(format!("Calling exec gas={}", gas))
-		}
-
 		loop {
 			let result = self.step(ext, dm_tracer);
 			match result {
