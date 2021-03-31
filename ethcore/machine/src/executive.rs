@@ -707,7 +707,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 									Err(ref err) => {
 										tracer.done_trace_failed(err);
 										if dm_tracer.is_enabled() {
-											dm_tracer.end_failed_call();
+											dm_tracer.end_failed_call("consume_create".to_string());
 										}
 									},
 								}
@@ -749,7 +749,7 @@ impl<'a, DM> CallCreateExecutive<'a, DM> where DM: deepmind::Tracer {
 									Err(ref err) => {
 										tracer.done_trace_failed(err);
 										if dm_tracer.is_enabled() {
-											dm_tracer.end_failed_call();
+											dm_tracer.end_failed_call("consume_call".to_string());
 										}
 									},
 								}
@@ -1057,7 +1057,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 				tracer.done_trace_failed(err);
 
 				if dm_tracer.is_enabled() {
-					dm_tracer.end_failed_call();
+					dm_tracer.end_failed_call("call".to_string());
 				}
 			},
 		}
@@ -1167,7 +1167,7 @@ impl<'a, B: 'a + StateBackend> Executive<'a, B> {
 				tracer.done_trace_failed(err);
 
 				if dm_tracer.is_enabled() {
-					dm_tracer.end_failed_call();
+					dm_tracer.end_failed_call("create".to_string());
 				}
 			},
 		}

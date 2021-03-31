@@ -189,6 +189,16 @@ pub struct Interpreter<Cost: CostType> {
 
 impl<Cost: 'static + CostType, DM> vm::Exec<DM> for Interpreter<Cost> where DM: deepmind::Tracer {
 	fn exec(mut self: Box<Self>, ext: &mut dyn vm::Ext<DM>, dm_tracer: &mut DM) -> vm::ExecTrapResult<GasLeft, DM> {
+		if dm_tracer.is_enabled() {
+			let gasometer = self.gasometer.as_ref();
+			let mut gas = 0 as u64;
+			if  gasometer.is_some() {
+				gas = gasometer.unwrap().current_gas.as_u256().as_u64();
+			}
+
+			dm_tracer.debug(format!("Calling exec gas={}", gas))
+		}
+
 		loop {
 			let result = self.step(ext, dm_tracer);
 			match result {
@@ -199,7 +209,12 @@ impl<Cost: 'static + CostType, DM> vm::Exec<DM> for Interpreter<Cost> where DM: 
 					//	 OK: It will be a GasLeft enum [GasLeft::Known,GasLeft::NeedsReturn]
 					if dm_tracer.is_enabled() {
 						if let Err(ref err) = value {
-							dm_tracer.failed_call(&self.gasometer.as_ref().expect(GASOMETER_PROOF).current_gas.as_u256(), err.to_string());
+							let gas_left = match self.gasometer.as_ref() {
+							    Some(_) => self.gasometer.as_ref().expect(GASOMETER_PROOF).current_gas.as_u256(),
+							    None => U256::zero(),
+							};
+
+							dm_tracer.failed_call(&gas_left, err.to_string());
 						}
 					}
 
@@ -334,7 +349,8 @@ impl<Cost: CostType> Interpreter<Cost> {
 		// DEEPMIND: the first step is to check if `resume_result` is SOME.. this will only
 		// be set when we are returning from a sub-call or sub-create which occurs at line 230 & 270 `resume_call`  & `resume_create`
 		let dm_is_resumed_call = self.resume_result.is_some();
-		let mut dm_should_perform_sub_call = false;
+		let mut dm_did_record_before_call = false;
+
 		let result = match self.resume_result.take() {
 			Some(result) => result,
 			None => {
@@ -388,7 +404,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 					let mut gas_cost = requirements.gas_cost;
 
 					if self.should_record_gas_event(instruction) {
-						dm_should_perform_sub_call = true;
+						dm_did_record_before_call = true;
 						dm_tracer.record_before_call_gas_event(current_gas.as_u256().as_usize());
 					}
 
@@ -407,10 +423,8 @@ impl<Cost: CostType> Interpreter<Cost> {
 
 				self.mem.expand(requirements.memory_required_size);
 
-
 				self.gasometer.as_mut().expect(GASOMETER_PROOF).current_mem_gas = requirements.memory_total_gas;
 				self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas - requirements.gas_cost;
-
 
 				evm_debug!({ self.informant.before_instruction(self.reader.position, instruction, info, &self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas, &self.stack) });
 
@@ -442,7 +456,8 @@ impl<Cost: CostType> Interpreter<Cost> {
 			let gas_old = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas;
 			if dm_tracer.is_enabled() {
 				dm_tracer.record_gas_refund(gas_old.as_usize(), gas.as_usize());
-				if dm_should_perform_sub_call {
+
+				if dm_did_record_before_call {
 					dm_tracer.record_after_call_gas_event(gas_old.as_usize() +  gas.as_usize())
 				}
 

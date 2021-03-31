@@ -2,7 +2,6 @@ use std::{fmt, sync::Arc};
 use rustc_hex::ToHex;
 use ethereum_types as eth;
 use serde::{Serialize, Serializer};
-use ethereum_types::H64;
 use parity_version::{ to_deepmind_version };
 
 pub static EMPTY_BYTES: [u8; 0] = [];
@@ -37,6 +36,8 @@ impl Default for Config {
 
 pub trait Printer: Send + Sync {
     fn print(&self, _input: &str) {}
+
+    fn debug(&self, _input: &str) {}
 }
 
 pub struct DiscardPrinter {
@@ -64,6 +65,16 @@ impl Printer for IoPrinter {
         //     panic!("Unable to full write line to I/O {}", err);
         // }
     }
+
+    /// Prints to the printer but not using DMLOG for now, this is to avoid
+    /// console reader problems where it does not discard DMLOG messages that
+    /// it don't understand.
+    ///
+    /// Remove this once the console reader has been fixed to simply discard
+    /// messages that it doesn't know about.
+    fn debug(&self, input: &str) {
+        println!("DMDEBUG {}", input);
+    }
 }
 
 pub trait Tracer: Send {
@@ -73,7 +84,7 @@ pub trait Tracer: Send {
     fn reverted_call(&self, _gas_left: &eth::U256) {}
     fn failed_call(&mut self, _gas_left_after_failure: &eth::U256, _err: String) {}
     fn end_call(&mut self, _gas_left: &eth::U256, _return_data: Option<&[u8]>) {}
-    fn end_failed_call(&mut self) {}
+    fn end_failed_call(&mut self, _from: String) {}
 
     fn record_balance_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256, _reason: BalanceChangeReason) {}
     fn record_nonce_change(&mut self, _address: &eth::Address, _old: &eth::U256, _new: &eth::U256) {}
@@ -218,10 +229,10 @@ impl Tracer for TransactionTracer {
         self.last_pop_call_index = Some(call_index);
     }
 
-    fn end_failed_call(&mut self) {
+    fn end_failed_call(&mut self, from: String) {
 	    let gas_left = match self.gas_left_after_latest_failure {
             Some(amount) => amount,
-            None => panic!("There should be a gas_left_after_latest_failure value set at this point [{:?}]", self.hash)
+            None => panic!("There should be a gas_left_after_latest_failure value set at {} [{:?}]", from, self.hash)
         };
 		self.gas_left_after_latest_failure = None;
 
@@ -361,7 +372,7 @@ impl Tracer for TransactionTracer {
 		let active_call_index = self.active_call_index();
 		let last_pop_call_index = self.last_pop_call_index.unwrap_or(0);
 
-		self.printer.print(format!("CONTEXT active_call_index:{active_call_index} last_pop_call_index:{last_pop_call_index} message:{message}",
+		self.printer.debug(format!("CONTEXT active_call_index={active_call_index} last_pop_call_index={last_pop_call_index} message={message}",
 			active_call_index = active_call_index,
 			last_pop_call_index = last_pop_call_index,
 			message = message,
@@ -686,7 +697,7 @@ impl<'a> BlockContext<'a> {
         self.context.printer.print(format!("FINALIZE_BLOCK {num}", num = num).as_ref())
     }
 
-    pub fn end_block(&self, num: u64, size: u64, mut header:  Header, uncles: Vec<Header>) {
+    pub fn end_block(&self, num: u64, size: u64, header:  Header, uncles: Vec<Header>) {
 		self.context.printer.print(format!("END_BLOCK {num} {size} {meta}",
             num = num,
             size = size,
