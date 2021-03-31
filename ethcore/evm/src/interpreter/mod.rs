@@ -386,26 +386,25 @@ impl<Cost: CostType> Interpreter<Cost> {
 				}
 
 				if dm_tracer.is_enabled() && requirements.dm_reason.is_some() {
-					let dm_reason = requirements.dm_reason.unwrap();
-					let schedule = ext.schedule();
-
-
 					let mut current_gas = self.gasometer.as_mut().expect(GASOMETER_PROOF).current_gas;
-					let mut gas_cost = requirements.gas_cost;
 
 					if self.should_record_gas_event(instruction) {
 						dm_did_record_before_call = true;
 						dm_tracer.record_before_call_gas_event(current_gas.as_u256().as_usize());
 					}
 
-					// Geth contract creation logs two gas changes sadly, one for the base cost of the OpCode which is
-					// usually 32000 (`schedule.create_gas` here) and another one with the dynamic portion of the op code. We
+					// Geth contract creation logs two gas changes, one for the base cost of the OpCode which is
+					// usually 32000 (more in case of CREATE2) and another one with the dynamic portion of the op code. We
 					// need to replicate this behavior here, so we compute that gas change in step if required.
-					if dm_reason == deepmind::GasChangeReason::ContractCreation || dm_reason == deepmind::GasChangeReason::ContractCreation2 {
-						dm_tracer.record_gas_consume(current_gas.as_usize(), schedule.create_gas, dm_reason);
+					let static_gas = requirements.dm_static_gas;
+					let mut gas_cost = requirements.gas_cost;
+					let dm_reason = requirements.dm_reason.unwrap();
 
-						current_gas = current_gas - Cost::from(schedule.create_gas);
-						gas_cost = gas_cost - Cost::from(schedule.create_gas);
+					if dm_reason == deepmind::GasChangeReason::ContractCreation || dm_reason == deepmind::GasChangeReason::ContractCreation2 {
+						dm_tracer.record_gas_consume(current_gas.as_usize(), static_gas.as_usize(), dm_reason);
+
+						current_gas = current_gas - requirements.dm_static_gas;
+						gas_cost = gas_cost - requirements.dm_static_gas;
 					}
 
 					dm_tracer.record_gas_consume(current_gas.as_usize(), gas_cost.as_usize(), dm_reason);

@@ -45,6 +45,7 @@ pub struct InstructionRequirements<Cost> {
 	pub provide_gas: Option<Cost>,
 	pub memory_total_gas: Cost,
 	pub memory_required_size: usize,
+	pub dm_static_gas: Cost,
 	pub dm_reason: Option<deepmind::GasChangeReason>,
 }
 
@@ -306,29 +307,31 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 		};
 
 		Ok(match cost {
-			Request::Gas(gas, dm_reason) => {
+			Request::Gas(static_gas, dm_reason) => {
 				InstructionRequirements {
-					gas_cost: gas,
+					gas_cost: static_gas,
 					provide_gas: None,
 					memory_required_size: 0,
 					memory_total_gas: self.current_mem_gas,
+					dm_static_gas: static_gas,
 					dm_reason,
 				}
 			},
-			Request::GasMem(gas, mem_size, dm_reason) => {
+			Request::GasMem(static_gas, mem_size, dm_reason) => {
 				let (mem_gas_cost, new_mem_gas, new_mem_size) = self.mem_gas_cost(schedule, current_mem_size, &mem_size)?;
-				let gas = overflowing!(gas.overflow_add(mem_gas_cost));
+				let gas = overflowing!(static_gas.overflow_add(mem_gas_cost));
 				InstructionRequirements {
 					gas_cost: gas,
 					provide_gas: None,
 					memory_required_size: new_mem_size,
 					memory_total_gas: new_mem_gas,
+					dm_static_gas: static_gas,
 					dm_reason,
 				}
 			},
-			Request::GasMemProvide(gas, mem_size, requested, dm_reason) => {
+			Request::GasMemProvide(static_gas, mem_size, requested, dm_reason) => {
 				let (mem_gas_cost, new_mem_gas, new_mem_size) = self.mem_gas_cost(schedule, current_mem_size, &mem_size)?;
-				let gas = overflowing!(gas.overflow_add(mem_gas_cost));
+				let gas = overflowing!(static_gas.overflow_add(mem_gas_cost));
 				let provided = self.gas_provided(schedule, gas, requested)?;
 				let total_gas = overflowing!(gas.overflow_add(provided));
 
@@ -337,14 +340,15 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 					provide_gas: Some(provided),
 					memory_required_size: new_mem_size,
 					memory_total_gas: new_mem_gas,
+					dm_static_gas: static_gas,
 					dm_reason,
 				}
 			},
-			Request::GasMemCopy(gas, mem_size, copy, dm_reason) => {
+			Request::GasMemCopy(static_gas, mem_size, copy, dm_reason) => {
 				let (mem_gas_cost, new_mem_gas, new_mem_size) = self.mem_gas_cost(schedule, current_mem_size, &mem_size)?;
 				let copy = overflowing!(to_word_size(copy));
 				let copy_gas = overflowing!(Gas::from(schedule.copy_gas).overflow_mul(copy));
-				let gas = overflowing!(gas.overflow_add(copy_gas));
+				let gas = overflowing!(static_gas.overflow_add(copy_gas));
 				let gas = overflowing!(gas.overflow_add(mem_gas_cost));
 
 				InstructionRequirements {
@@ -352,6 +356,7 @@ impl<Gas: evm::CostType> Gasometer<Gas> {
 					provide_gas: None,
 					memory_required_size: new_mem_size,
 					memory_total_gas: new_mem_gas,
+					dm_static_gas: static_gas,
 					dm_reason,
 				}
 			},
