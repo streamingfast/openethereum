@@ -1129,15 +1129,15 @@ usage! {
 
 		["Deep Mind Options"]
 			FLAG flag_deep_mind: (bool) = false, or |_| None,
-			"--deep-mind",
+			"--firehose-deep-mind",
 			"Activate/deactivate Deep Mind instrumentation within the node.",
 
 			FLAG flag_deep_mind_sync_instrumentation: (bool) = false, or |_| None,
-			"--deep-mind-sync-instrumentation",
+			"--firehose-deep-mind-sync-instrumentation",
 			"Activate/deactivate Deep Mind chain syncing output instrumentation within the node.",
 
 			FLAG flag_deep_mind_block_progress: (bool) = false, or |_| None,
-			"--deep-mind-block-progress",
+			"--firehose-deep-mind-block-progress",
 			"Activate/deactivate Deep Mind block progress output instrumentation within the node.",
 	}
 }

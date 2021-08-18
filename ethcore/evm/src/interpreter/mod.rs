@@ -427,6 +427,7 @@ impl<Cost: CostType> Interpreter<Cost> {
 						if self.do_trace {
 							ext.trace_failed();
 						}
+
 						return InterpreterResult::Done(Err(x));
 					},
 					Ok(x) => x,
